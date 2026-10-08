@@ -1,0 +1,77 @@
+{
+  "id": "streaming_generic",
+  "name": "Streaming (generico)",
+  "description": "Master bilanciato per tutte le piattaforme: -14 LUFS, -1 dBTP, dinamica preservata.",
+  "metrics": {
+    "integratedLufs": {
+      "min": -15,
+      "max": -12,
+      "target": -14,
+      "warn": 2
+    },
+    "truePeakMax": {
+      "min": -6,
+      "max": -1,
+      "target": -1,
+      "warn": 0.5
+    },
+    "loudnessRange": {
+      "min": 4,
+      "max": 9,
+      "target": 6,
+      "warn": 2
+    },
+    "plr": {
+      "min": 9,
+      "max": 14,
+      "target": 11,
+      "warn": 2
+    },
+    "minPsr": {
+      "min": 7,
+      "max": 12,
+      "target": 9,
+      "warn": 1.5
+    },
+    "dr": {
+      "min": 7,
+      "max": 12,
+      "target": 9,
+      "warn": 2
+    }
+  },
+  "tonalCurve": [
+    -18.08,
+    -13.08,
+    -8.08,
+    -2.08,
+    1.92,
+    5.92,
+    4.92,
+    3.92,
+    3.92,
+    4.36,
+    4.66,
+    4.81,
+    4.82,
+    4.68,
+    4.39,
+    3.95,
+    3.37,
+    2.65,
+    1.77,
+    0.76,
+    -0.41,
+    -1.72,
+    -3.18,
+    -4.79,
+    -6.54,
+    -8.28,
+    -9.7,
+    -11.26,
+    -13.01,
+    -15.49,
+    -18.12
+  ],
+  "tonalTolerance": 2.5
+}

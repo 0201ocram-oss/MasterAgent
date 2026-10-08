@@ -1,0 +1,101 @@
+{
+  "id": "pop",
+  "name": "Pop commerciale",
+  "description": "Valori tipici delle release pop attuali (loudness da mercato, non da normalizzazione).",
+  "metrics": {
+    "integratedLufs": {
+      "min": -9,
+      "max": -6.5,
+      "target": -7.5,
+      "warn": 1.5
+    },
+    "truePeakMax": {
+      "min": -2,
+      "max": -0.3,
+      "target": -1,
+      "warn": 0.5
+    },
+    "loudnessRange": {
+      "min": 3,
+      "max": 7,
+      "target": 5,
+      "warn": 2
+    },
+    "plr": {
+      "min": 7,
+      "max": 10,
+      "target": 8.5,
+      "warn": 1.5
+    },
+    "minPsr": {
+      "min": 6,
+      "max": 9,
+      "target": 7.5,
+      "warn": 1.5
+    },
+    "dr": {
+      "min": 5,
+      "max": 9,
+      "target": 7,
+      "warn": 1.5
+    },
+    "spectralTilt": {
+      "min": -3.04,
+      "max": -1.64,
+      "target": -2.34,
+      "warn": 0.6
+    },
+    "correlation": {
+      "min": 0.35,
+      "max": 0.9,
+      "target": 0.6,
+      "warn": 0.15
+    },
+    "widthPercent": {
+      "min": 12,
+      "max": 35,
+      "target": 22,
+      "warn": 8
+    },
+    "lowEndWidthPercent": {
+      "min": 0,
+      "max": 8,
+      "target": 2,
+      "warn": 6
+    }
+  },
+  "tonalCurve": [
+    -18.08,
+    -13.08,
+    -8.08,
+    -2.08,
+    1.92,
+    5.92,
+    4.92,
+    3.92,
+    3.92,
+    4.36,
+    4.66,
+    4.81,
+    4.82,
+    4.68,
+    4.39,
+    3.95,
+    3.37,
+    2.65,
+    1.77,
+    0.76,
+    -0.41,
+    -1.72,
+    -3.18,
+    -4.79,
+    -6.54,
+    -8.28,
+    -9.7,
+    -11.26,
+    -13.01,
+    -15.49,
+    -18.12
+  ],
+  "tonalTolerance": 2.5
+}

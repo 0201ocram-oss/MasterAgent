@@ -1,0 +1,101 @@
+{
+  "id": "edm_club",
+  "name": "EDM / Club",
+  "description": "Master da club: molto denso, sub forte e mono, alte brillanti.",
+  "metrics": {
+    "integratedLufs": {
+      "min": -8,
+      "max": -5,
+      "target": -6.5,
+      "warn": 1.5
+    },
+    "truePeakMax": {
+      "min": -1.5,
+      "max": -0.1,
+      "target": -0.5,
+      "warn": 0.5
+    },
+    "loudnessRange": {
+      "min": 2,
+      "max": 6,
+      "target": 4,
+      "warn": 2
+    },
+    "plr": {
+      "min": 6,
+      "max": 9,
+      "target": 7.5,
+      "warn": 1.5
+    },
+    "minPsr": {
+      "min": 5,
+      "max": 8,
+      "target": 6.5,
+      "warn": 1.5
+    },
+    "dr": {
+      "min": 4,
+      "max": 8,
+      "target": 6,
+      "warn": 1.5
+    },
+    "spectralTilt": {
+      "min": -3.03,
+      "max": -1.63,
+      "target": -2.33,
+      "warn": 0.6
+    },
+    "correlation": {
+      "min": 0.35,
+      "max": 0.9,
+      "target": 0.6,
+      "warn": 0.15
+    },
+    "widthPercent": {
+      "min": 12,
+      "max": 38,
+      "target": 24,
+      "warn": 8
+    },
+    "lowEndWidthPercent": {
+      "min": 0,
+      "max": 5,
+      "target": 1,
+      "warn": 5
+    }
+  },
+  "tonalCurve": [
+    -11.3,
+    -5.3,
+    -0.3,
+    4.7,
+    7.7,
+    7.7,
+    6.2,
+    4.2,
+    3.7,
+    4.15,
+    4.45,
+    4.6,
+    4.6,
+    4.46,
+    4.18,
+    3.74,
+    3.16,
+    2.44,
+    1.56,
+    0.54,
+    -0.62,
+    -1.93,
+    -3.39,
+    -5.0,
+    -6.75,
+    -8.45,
+    -9.71,
+    -11.12,
+    -12.72,
+    -15.2,
+    -17.83
+  ],
+  "tonalTolerance": 2.5
+}

@@ -1,0 +1,71 @@
+{
+  "id": "apple_music",
+  "name": "Apple Music",
+  "description": "Sound Check a -16 LUFS, true peak -1 dBTP: premia i master più dinamici.",
+  "metrics": {
+    "integratedLufs": {
+      "min": -17,
+      "max": -14,
+      "target": -16,
+      "warn": 2
+    },
+    "truePeakMax": {
+      "min": -6,
+      "max": -1,
+      "target": -1,
+      "warn": 0.5
+    },
+    "loudnessRange": {
+      "min": 4,
+      "max": 10,
+      "target": 7,
+      "warn": 2
+    },
+    "plr": {
+      "min": 10,
+      "max": 15,
+      "target": 12,
+      "warn": 2
+    },
+    "minPsr": {
+      "min": 8,
+      "max": 13,
+      "target": 10,
+      "warn": 1.5
+    }
+  },
+  "tonalCurve": [
+    -18.08,
+    -13.08,
+    -8.08,
+    -2.08,
+    1.92,
+    5.92,
+    4.92,
+    3.92,
+    3.92,
+    4.36,
+    4.66,
+    4.81,
+    4.82,
+    4.68,
+    4.39,
+    3.95,
+    3.37,
+    2.65,
+    1.77,
+    0.76,
+    -0.41,
+    -1.72,
+    -3.18,
+    -4.79,
+    -6.54,
+    -8.28,
+    -9.7,
+    -11.26,
+    -13.01,
+    -15.49,
+    -18.12
+  ],
+  "tonalTolerance": 2.5
+}

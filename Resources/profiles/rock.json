@@ -1,0 +1,101 @@
+{
+  "id": "rock",
+  "name": "Rock",
+  "description": "Rock/alternative moderno: denso ma con più transiente sui medi.",
+  "metrics": {
+    "integratedLufs": {
+      "min": -10,
+      "max": -7,
+      "target": -8.5,
+      "warn": 1.5
+    },
+    "truePeakMax": {
+      "min": -2,
+      "max": -0.3,
+      "target": -1,
+      "warn": 0.5
+    },
+    "loudnessRange": {
+      "min": 3,
+      "max": 8,
+      "target": 5,
+      "warn": 2
+    },
+    "plr": {
+      "min": 8,
+      "max": 11,
+      "target": 9.5,
+      "warn": 1.5
+    },
+    "minPsr": {
+      "min": 6.5,
+      "max": 10,
+      "target": 8,
+      "warn": 1.5
+    },
+    "dr": {
+      "min": 6,
+      "max": 10,
+      "target": 8,
+      "warn": 1.5
+    },
+    "spectralTilt": {
+      "min": -3.02,
+      "max": -1.62,
+      "target": -2.32,
+      "warn": 0.6
+    },
+    "correlation": {
+      "min": 0.3,
+      "max": 0.9,
+      "target": 0.55,
+      "warn": 0.15
+    },
+    "widthPercent": {
+      "min": 15,
+      "max": 40,
+      "target": 25,
+      "warn": 8
+    },
+    "lowEndWidthPercent": {
+      "min": 0,
+      "max": 10,
+      "target": 3,
+      "warn": 6
+    }
+  },
+  "tonalCurve": [
+    -21.96,
+    -16.96,
+    -11.96,
+    -5.96,
+    -0.96,
+    3.04,
+    4.04,
+    4.04,
+    4.04,
+    4.49,
+    4.79,
+    4.94,
+    4.94,
+    4.8,
+    4.52,
+    4.09,
+    3.52,
+    2.84,
+    2.06,
+    1.22,
+    0.28,
+    -0.85,
+    -2.26,
+    -3.99,
+    -5.96,
+    -8.03,
+    -10.05,
+    -12.15,
+    -14.37,
+    -16.86,
+    -19.49
+  ],
+  "tonalTolerance": 2.5
+}
