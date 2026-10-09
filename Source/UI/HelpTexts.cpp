@@ -137,6 +137,18 @@ namespace
                               "60. Indicativo: serve a seguire i progressi tra una correzione e l'altra, non è un giudizio artistico." },
             { "counters",     "Conteggio diagnosi\nQuante misure sono critiche (rosso), da verificare (giallo) e nel range del "
                               "target (verde), più quelle che hai ignorato come scelte volute." },
+            // --- forma d'onda (app standalone) ---------------------------------------------------------------
+            { "panel:waveform",   "Forma d'onda\nIl brano intero con i problemi segnati nel punto in cui avvengono. Clic sulla "
+                                  "forma d'onda per ascoltare da lì, clic su un segno per ascoltarlo o ignorarlo." },
+            { "wave:overview",    "Forma d'onda e segni\nIn chiaro i picchi, in pieno il livello RMS. Segni puntuali: clipping "
+                                  "(quadrato), true peak oltre il ceiling del target (triangolo), buchi di silenzio digitale (cerchio). "
+                                  "Fasce: sezioni troppo compresse (PSR sotto il minimo del target) e fase invertita (correlazione "
+                                  "negativa per almeno un secondo). Le soglie seguono il target attivo e la fase Mix/Master." },
+            { "wave:legend",      "Legenda\nQuanti segni di ogni tipo restano da controllare. Clic su una voce per ignorare (o "
+                                  "ripristinare) tutti i segni di quel tipo, per esempio un clipper usato di proposito. "
+                                  "I segni ignorati restano visibili in grigio fino alla chiusura del brano." },
+            { "wave:transport",   "Ascolto\nPlay/pausa del brano (anche con la barra spaziatrice), posizione attuale e durata. "
+                                  "L'uscita è la scheda audio scelta nelle impostazioni audio dell'app." },
             // --- coerenza album -----------------------------------------------------------------------------
             { "panel:album",      "Coerenza album\nOgni brano confrontato con il resto dell'album (la mediana dei brani): loudness "
                                   "della sezione più forte, bilanciamento tonale, ceiling e larghezza stereo. Serve a far suonare "
@@ -145,7 +157,7 @@ namespace
                                   "e la differenza tra il brano più forte e il più piano. Il confronto tonale usa i ritornelli "
                                   "(sezione più forte) quando tutti i brani ne hanno una." },
             { "album:row",        "Brani\nUna riga per brano, nell'ordine dei nomi dei file. Clic per vedere le sue diagnosi a destra, "
-                                  "doppio clic per aprirlo nella dashboard come file master (analisi completa con il target attivo)." },
+                                  "doppio clic per aprirlo nella dashboard (analisi completa con il target attivo, forma d'onda e ascolto)." },
             { "album:median",     "Mediana dell'album\nIl riferimento comune: il valore centrale tra i brani. Al contrario della media "
                                   "non si sposta per un brano fuori posto, che così risulta segnalato da solo." },
             { "album:integrated", "Integrated (LUFS)\nLoudness media del brano intero. Solo informativa: ballate e brani con più dinamica "

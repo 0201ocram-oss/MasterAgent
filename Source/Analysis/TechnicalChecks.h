@@ -1,8 +1,10 @@
 #pragma once
 
 #include "AnalysisSnapshot.h"
+#include "Timeline.h"
 
 #include <array>
+#include <vector>
 
 namespace ma
 {
@@ -24,8 +26,15 @@ public:
 
     int getClipEvents() const noexcept { return clipEvents; }
 
+    /** Analisi offline: registra anche dove avviene ogni evento di clipping (nullptr = spento). */
+    void setClipLog (std::vector<SampleRange>* log) noexcept { clipLog = log; }
+
 private:
     void processClip (int ch, float x) noexcept;
+
+    std::vector<SampleRange>* clipLog = nullptr;
+    std::array<long, 2> openClip { -1, -1 };   // evento in corso nel registro, per canale
+    long long samplePos = 0;
 
     double sampleRate = 48000.0;
     int numChannels = 2;

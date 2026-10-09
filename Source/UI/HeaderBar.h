@@ -22,7 +22,10 @@ private:
     Icon icon;
 };
 
-/** Barra superiore: target, modalità (brano intero / live), reference, A/B, opzioni, reset, export, guida, schermo intero. */
+/**
+    Barra superiore: target, modalità (brano intero / live), reference, A/B, opzioni, reset, export, guida, schermo intero.
+    Nell'app standalone, al posto di modalità e reset: "Nuova analisi" e il ritorno all'album.
+*/
 class HeaderBar : public juce::Component
 {
 public:
@@ -40,13 +43,18 @@ public:
     void setListening (bool listening);
     void setLiveMode (bool live);
     void setMixPhase (bool mix);
-    /** Brano intero / Live hanno senso solo per l'ingresso live (non per un file analizzato). */
-    void setModeEnabled (bool enabled);
     void setHelpMode (bool on);
     void setFullScreen (bool on);
 
+    void setStandalone (bool isStandalone);
+    /** Standalone: pulsante "Album" visibile se c'è un album analizzato, acceso se è la schermata attuale. */
+    void setAlbumAvailable (bool available, bool showing);
+    /** Standalone: sulla schermata iniziale "Nuova analisi" non serve. */
+    void setNewAnalysisEnabled (bool enabled) { newAnalysisButton.setEnabled (enabled); }
+
     std::function<void (const juce::String&)> onTargetChanged;
     std::function<void()> onLoadReference, onClearReference, onSaveProfile, onReset, onExport, onOptions, onToggleFullScreen;
+    std::function<void()> onNewAnalysis, onShowAlbum;
     std::function<void (bool)> onListenChanged, onLiveModeChanged, onMixPhaseChanged, onHelpModeChanged;
 
     juce::Component& getOptionsButton() noexcept { return optionsButton; }
@@ -61,6 +69,10 @@ private:
 
     juce::TextButton wholeSongButton { "Brano intero" };
     juce::TextButton liveButton { "Live" };
+
+    juce::TextButton newAnalysisButton;
+    juce::TextButton albumButton;
+    bool standalone = false, albumAvailable = false;
 
     juce::TextButton mixButton { "Mix" };
     juce::TextButton masterButton { "Master" };

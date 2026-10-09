@@ -6,7 +6,11 @@
 #include "UI/LoudnessPanel.h"
 #include "UI/ReportPanel.h"
 #include "UI/SpectrumPanel.h"
+#include "UI/StartView.h"
 #include "UI/StereoPanel.h"
+#include "UI/WaveformPanel.h"
+
+#include <set>
 
 class MasterAgentEditor : public juce::AudioProcessorEditor,
                           private juce::Timer
@@ -38,7 +42,7 @@ private:
         void fileDragEnter (const juce::StringArray&, int, int) override       { owner.dragHover = true; repaint(); }
         void fileDragExit (const juce::StringArray&) override                  { owner.dragHover = false; repaint(); }
         void filesDropped (const juce::StringArray& files, int x, int y) override { owner.filesDropped (files, { x, y }); }
-        void mouseDown (const juce::MouseEvent& e) override                   { owner.contentClicked (e.position.toInt()); }
+        bool keyPressed (const juce::KeyPress& key) override                  { return owner.contentKeyPressed (key); }
 
     private:
         MasterAgentEditor& owner;
@@ -56,10 +60,9 @@ private:
     void layoutDashboard();
     bool isInterestedInFileDrag (const juce::StringArray& files) const;
     void filesDropped (const juce::StringArray& files, juce::Point<int> position);
-    void contentClicked (juce::Point<int> position);
+    bool contentKeyPressed (const juce::KeyPress& key);
 
-    // banner sotto la barra in alto: file analizzato come master, ascolto del reference
-    bool hasFileBanner() const;
+    // banner sotto la barra in alto: ascolto del reference
     int bannerCount() const;
     juce::Rectangle<int> bannerArea (int index) const;
 
@@ -72,7 +75,16 @@ private:
     void saveReferenceAsProfile();
     void exportReport();
 
-    // file come master e versioni
+    // standalone: schermata iniziale, brano con forma d'onda e lettore, album
+    enum class Screen { start, track, album };
+    void showScreen (Screen newScreen);
+    void startTrackAnalysis (const juce::File& file);
+    void updateWaveform();
+    ma::MarkerSettings currentMarkerSettings() const;
+    void resetIgnoredMarkers();
+    void togglePlayback();
+
+    // brano da analizzare e versioni
     void chooseMasterFile();
     void saveVersion();
     void renameComparedVersion();
@@ -95,13 +107,13 @@ private:
     // coerenza album
     void chooseAlbumFiles();
     void startAlbumCheck (const juce::Array<juce::File>& files);
-    void showAlbum (bool on);
     void updateAlbumView();
     void exportAlbum();
 
     std::array<ma::ui::Panel*, 7> allPanels();
 
     MasterAgentProcessor& processor;
+    const bool standalone;
     juce::SharedResourcePointer<ma::ui::SharedLookAndFeel> sharedLookAndFeel;
     ma::ui::LookAndFeel& lookAndFeel { sharedLookAndFeel->lookAndFeel };
     Content content { *this };
@@ -115,7 +127,16 @@ private:
     ma::ui::StereoPanel stereoPanel;
     ma::ui::StreamingPanel streamingPanel;
     ma::ui::ReportPanel reportPanel;
-    ma::ui::AlbumView albumView;      // sopra la dashboard, visibile solo quando richiesto
+    ma::ui::WaveformPanel waveformPanel;   // solo standalone, sopra la dashboard
+    ma::ui::AlbumView albumView;           // solo standalone, al posto della dashboard
+    ma::ui::StartView startView;           // solo standalone: schermata iniziale
+    Screen screen = Screen::track;
+
+    std::shared_ptr<const ma::TrackTimeline> shownTimeline;
+    ma::MarkerSettings shownMarkerSettings;
+    bool markersDirty = true;
+    std::set<juce::String> ignoredMarkerIds;                  // non salvati: valgono finché il brano resta aperto
+    std::array<bool, ma::kNumMarkerTypes> ignoredMarkerTypes {};
 
     ma::ui::DashboardData data;
     ma::TargetProfile referenceProfile;
@@ -130,7 +151,6 @@ private:
     std::unique_ptr<juce::AlertWindow> nameDialog, renameDialog;
     int seenVersionsRevision = -1;
     int seenAlbumRevision = -1;
-    bool albumVisible = false;
     int lastBannerCount = 0;
     std::unique_ptr<FullScreenWindow> fullScreenWindow;   // dopo i componenti: viene distrutto prima di loro
     int tick = 0;
@@ -138,6 +158,7 @@ private:
     bool dragHover = false;
 
     static constexpr int minWidth = 1400, minHeight = 820;   // dimensione minima della dashboard (unità logiche)
+    static constexpr int minHeightStandalone = 940;          // con la forma d'onda sopra la dashboard
     static constexpr int headerHeight = 60;
     static constexpr int bannerHeight = 26;
     static constexpr int normalTooltipDelayMs = 600;

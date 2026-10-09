@@ -67,6 +67,16 @@ HeaderBar::HeaderBar()
     liveButton.onClick = [this] { if (liveButton.getToggleState() && onLiveModeChanged) onLiveModeChanged (true); };
     wholeSongButton.onClick = [this] { if (wholeSongButton.getToggleState() && onLiveModeChanged) onLiveModeChanged (false); };
 
+    // standalone: nuova analisi (schermata iniziale) e ritorno all'album
+    addChildComponent (newAnalysisButton);
+    newAnalysisButton.setButtonText ("Nuova analisi"_t);
+    newAnalysisButton.setTooltip ("Torna alla schermata iniziale per analizzare un altro brano o un album"_t);
+    newAnalysisButton.onClick = [this] { if (onNewAnalysis) onNewAnalysis(); };
+    addChildComponent (albumButton);
+    albumButton.setButtonText ("Album"_t);
+    albumButton.setTooltip ("Torna alla tabella di coerenza dell'album"_t);
+    albumButton.onClick = [this] { if (onShowAlbum) onShowAlbum(); };
+
     // fase di lavoro: mix bus durante il mixaggio oppure master
     for (auto* b : { &mixButton, &masterButton })
     {
@@ -124,6 +134,7 @@ void HeaderBar::applyColours()
     liveButton.setColour (juce::TextButton::buttonOnColourId, colours::liveOn);
     mixButton.setColour (juce::TextButton::buttonOnColourId, colours::mixOn);
     exportButton.setColour (juce::TextButton::buttonColourId, colours::accentDim);
+    albumButton.setColour (juce::TextButton::buttonOnColourId, colours::accentDim);
     listenButton.setColour (juce::TextButton::buttonOnColourId, colours::listenOn);
     refStatus.setColour (juce::Label::textColourId, colours::textDim);
 }
@@ -158,7 +169,8 @@ void HeaderBar::paint (juce::Graphics& g)
 
     // separatori verticali tra i gruppi
     g.setColour (colours::line.withMultipliedAlpha (0.7f));
-    for (auto* c : std::initializer_list<juce::Component*> { &wholeSongButton, &mixButton, &loadRefButton, &optionsButton, &helpButton })
+    for (auto* c : std::initializer_list<juce::Component*> { standalone ? (juce::Component*) &newAnalysisButton : &wholeSongButton,
+                                                              &mixButton, &loadRefButton, &optionsButton, &helpButton })
         g.fillRect (c->getX() - groupGap / 2 - 1, 14, 1, getHeight() - 28);
 }
 
@@ -169,8 +181,20 @@ void HeaderBar::resized()
 
     targetBox.setBounds (r.removeFromLeft (184));
     r.removeFromLeft (groupGap);
-    wholeSongButton.setBounds (r.removeFromLeft (100));
-    liveButton.setBounds (r.removeFromLeft (52));
+    if (standalone)
+    {
+        newAnalysisButton.setBounds (r.removeFromLeft (112));
+        if (albumAvailable)
+        {
+            r.removeFromLeft (6);
+            albumButton.setBounds (r.removeFromLeft (64));
+        }
+    }
+    else
+    {
+        wholeSongButton.setBounds (r.removeFromLeft (100));
+        liveButton.setBounds (r.removeFromLeft (52));
+    }
     r.removeFromLeft (groupGap);
     mixButton.setBounds (r.removeFromLeft (48));
     masterButton.setBounds (r.removeFromLeft (66));
@@ -183,8 +207,11 @@ void HeaderBar::resized()
     r.removeFromRight (groupGap);
     exportButton.setBounds (r.removeFromRight (80));
     r.removeFromRight (6);
-    resetButton.setBounds (r.removeFromRight (62));
-    r.removeFromRight (6);
+    if (! standalone)
+    {
+        resetButton.setBounds (r.removeFromRight (62));
+        r.removeFromRight (6);
+    }
     optionsButton.setBounds (r.removeFromRight (74));
     r.removeFromRight (groupGap);
 
@@ -245,10 +272,26 @@ void HeaderBar::setMixPhase (bool mix)
     (mix ? mixButton : masterButton).setToggleState (true, juce::dontSendNotification);
 }
 
-void HeaderBar::setModeEnabled (bool enabled)
+void HeaderBar::setStandalone (bool isStandalone)
 {
-    wholeSongButton.setEnabled (enabled);
-    liveButton.setEnabled (enabled);
+    standalone = isStandalone;
+    for (auto* b : { &wholeSongButton, &liveButton, &resetButton })
+        b->setVisible (! standalone);
+    newAnalysisButton.setVisible (standalone);
+    albumButton.setVisible (standalone && albumAvailable);
+    resized();
+    repaint();
+}
+
+void HeaderBar::setAlbumAvailable (bool available, bool showing)
+{
+    albumButton.setToggleState (showing, juce::dontSendNotification);
+    if (available == albumAvailable)
+        return;
+    albumAvailable = available;
+    albumButton.setVisible (standalone && albumAvailable);
+    resized();
+    repaint();
 }
 
 void HeaderBar::setHelpMode (bool on)

@@ -29,7 +29,12 @@ public:
     int getOvers1dB() const noexcept { return overs1Events; }
     int getOvers0dB() const noexcept { return overs0Events; }
 
+    /** Analisi offline: aggiunge il true peak massimo di ogni blocco da 100 ms (dBTP) a log (nullptr = spento). */
+    void setBlockLog (std::vector<float>* log) noexcept { blockLog = log; }
+
 private:
+    std::vector<float>* blockLog = nullptr;
+
     struct ChannelState
     {
         std::vector<double> history;   // doppia lunghezza per evitare il wrap nel prodotto scalare

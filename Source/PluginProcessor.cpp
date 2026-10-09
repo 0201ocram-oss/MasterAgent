@@ -3,10 +3,29 @@
 #include "Analysis/SnapshotIO.h"
 #include "Common/Text.h"
 
+namespace
+{
+    // il wrapper standalone imposta il tipo prima di creare il processor
+    bool isStandaloneWrapper()
+    {
+        return juce::PluginHostType::getPluginLoadedAs() == juce::AudioProcessor::wrapperType_Standalone;
+    }
+}
+
+juce::AudioProcessor::BusesProperties MasterAgentProcessor::makeBuses (bool standaloneApp)
+{
+    // standalone: solo uscita (il lettore), così l'app non apre l'ingresso della scheda audio
+    if (standaloneApp)
+        return BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true);
+
+    return BusesProperties()
+        .withInput ("Input", juce::AudioChannelSet::stereo(), true)
+        .withOutput ("Output", juce::AudioChannelSet::stereo(), true);
+}
+
 MasterAgentProcessor::MasterAgentProcessor()
-    : AudioProcessor (BusesProperties()
-                          .withInput ("Input", juce::AudioChannelSet::stereo(), true)
-                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+    : AudioProcessor (makeBuses (isStandaloneWrapper())),
+      standalone (isStandaloneWrapper())
 {
 }
 
@@ -20,12 +39,21 @@ bool MasterAgentProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
     const auto out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo())
         return false;
+    if (standalone)
+        return layouts.getMainInputChannelSet().isDisabled();
     return layouts.getMainInputChannelSet() == out;
 }
 
-void MasterAgentProcessor::prepareToPlay (double sampleRate, int)
+void MasterAgentProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
+    if (standalone)
+    {
+        player.prepare (sampleRate, samplesPerBlock);
+        reference.setHostSampleRate (sampleRate);
+        return;
+    }
+
     liveAnalysis.prepare (sampleRate, getTotalNumInputChannels());
     liveAnalysis.setLiveMode (liveMode.load(), liveWindowSeconds.load());
     reference.setHostSampleRate (sampleRate);
@@ -35,11 +63,22 @@ void MasterAgentProcessor::prepareToPlay (double sampleRate, int)
 void MasterAgentProcessor::releaseResources()
 {
     liveAnalysis.release();
+    player.release();
 }
 
 void MasterAgentProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
+
+    // standalone: l'uscita è il lettore, oppure il reference durante l'ascolto A/B
+    if (standalone)
+    {
+        player.render (buffer);
+        if (listenReference.load() && buffer.getNumChannels() > 0)
+            reference.renderPlayback (buffer.getWritePointer (0), buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr,
+                                      buffer.getNumSamples(), referenceGain.load());
+        return;
+    }
 
     const int numSamples = buffer.getNumSamples();
     const int numChannels = std::min (2, getTotalNumInputChannels());
@@ -139,8 +178,11 @@ void MasterAgentProcessor::analyseMasterFile (const juce::File& file)
         masterFile = file;
         masterFileState = MasterFileState::analysing;
         masterFileError.clear();
+        masterFileTimeline.reset();
     }
-    masterFileJob.start ({ file }, "Analisi"_t);
+    masterFileJob.start ({ file }, "Analisi"_t, true);
+    if (standalone)
+        player.load (file);
 }
 
 void MasterAgentProcessor::clearMasterFile()
@@ -151,6 +193,8 @@ void MasterAgentProcessor::clearMasterFile()
     masterFileState = MasterFileState::none;
     masterFileError.clear();
     masterFileSnapshot = {};
+    masterFileTimeline.reset();
+    player.unload();
 }
 
 void MasterAgentProcessor::updateMasterFile()
@@ -166,6 +210,7 @@ void MasterAgentProcessor::updateMasterFile()
     if (! results.snapshots.empty())
     {
         masterFileSnapshot = std::move (results.snapshots.front());
+        masterFileTimeline = results.timelines.empty() ? nullptr : results.timelines.front();
         masterFileState = MasterFileState::ready;
     }
     else
@@ -200,6 +245,12 @@ bool MasterAgentProcessor::getMasterFileSnapshot (ma::AnalysisSnapshot& dest) co
         return false;
     dest = masterFileSnapshot;
     return true;
+}
+
+std::shared_ptr<const ma::TrackTimeline> MasterAgentProcessor::getMasterFileTimeline() const
+{
+    const juce::ScopedLock lock (settingsLock);
+    return masterFileState == MasterFileState::ready ? masterFileTimeline : nullptr;
 }
 
 //==============================================================================
@@ -309,7 +360,7 @@ void MasterAgentProcessor::startAlbumCheck (const juce::Array<juce::File>& files
         album = {};
         albumState = AlbumState::analysing;
     }
-    albumJob.start (list, "Album"_t);
+    albumJob.start (list, "Album"_t, standalone);
     ++albumRevision;
 }
 
@@ -338,6 +389,7 @@ void MasterAgentProcessor::updateAlbum()
         album.files = results.files;
         album.names = results.names;
         album.skipped = results.skipped;
+        album.timelines = std::move (results.timelines);
         albumState = AlbumState::ready;
     }
     ++albumRevision;
@@ -358,14 +410,21 @@ MasterAgentProcessor::AlbumData MasterAgentProcessor::getAlbum() const
 void MasterAgentProcessor::useAlbumTrackAsMaster (int index)
 {
     masterFileJob.cancel();
-    const juce::ScopedLock lock (settingsLock);
-    if (! juce::isPositiveAndBelow (index, (int) album.snapshots.size()))
-        return;
+    juce::File file;
+    {
+        const juce::ScopedLock lock (settingsLock);
+        if (! juce::isPositiveAndBelow (index, (int) album.snapshots.size()))
+            return;
 
-    masterFile = album.files[index];
-    masterFileSnapshot = album.snapshots[(size_t) index];
-    masterFileState = MasterFileState::ready;
-    masterFileError.clear();
+        file = album.files[index];
+        masterFile = file;
+        masterFileSnapshot = album.snapshots[(size_t) index];
+        masterFileTimeline = (size_t) index < album.timelines.size() ? album.timelines[(size_t) index] : nullptr;
+        masterFileState = MasterFileState::ready;
+        masterFileError.clear();
+    }
+    if (standalone)
+        player.load (file);
 }
 
 juce::AudioProcessorEditor* MasterAgentProcessor::createEditor()
@@ -379,7 +438,6 @@ void MasterAgentProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty ("version", 1, nullptr);
     state.setProperty ("target", getSelectedTargetId(), nullptr);
     state.setProperty ("ignoredFindings", getIgnoredFindings().joinIntoString ("\n"), nullptr);
-    state.setProperty ("masterFilePath", getMasterFile().getFullPathName(), nullptr);
     {
         const juce::ScopedLock lock (settingsLock);
         juce::ValueTree list ("Versions");
@@ -453,10 +511,6 @@ void MasterAgentProcessor::setStateInformation (const void* data, int sizeInByte
         compareVersion = juce::isPositiveAndBelow (wanted, (int) versions.size()) ? wanted : -1;
         ++versionsRevision;
     }
-
-    const juce::File masterPath (state.getProperty ("masterFilePath", {}).toString());
-    if (masterPath.existsAsFile() && masterPath != getMasterFile())
-        analyseMasterFile (masterPath);
 
     const juce::File refFile (state.getProperty ("referencePath", {}).toString());
     if (refFile.existsAsFile() && refFile != reference.getFile())

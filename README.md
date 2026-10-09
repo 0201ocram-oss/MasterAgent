@@ -3,6 +3,10 @@
 Plugin VST3 di **sola analisi** per mix e mastering. Si inserisce come ultimo plugin sul mix bus (mentre mixi) o sul master bus, misura tutti i parametri e li confronta con uno standard di mercato o con uno o più brani di riferimento, con consigli di correzione concreti.
 L'audio passa **inalterato** (bit-transparent, latenza 0). Le correzioni le fai tu con i tuoi plugin.
 
+Due modi di usarlo:
+- **Nella DAW (VST3)**: analizza ciò che suona sul bus, in modalità *Brano intero* o *Live*.
+- **App standalone** (`MasterAgent.exe`): analizza file. All'avvio scegli se **analizzare un brano** (report completo, forma d'onda con i problemi segnati e ascolto) oppure **confrontare più brani** come album.
+
 ## Installazione
 1. Compila (vedi sotto) oppure prendi `build/MasterAgent_artefacts/Release/VST3/MasterAgent.vst3`.
 2. Copia la cartella `MasterAgent.vst3` in `C:\Program Files\Common Files\VST3\`.
@@ -45,11 +49,15 @@ L'audio passa **inalterato** (bit-transparent, latenza 0). Le correzioni le fai 
 - **Live**: finestra mobile sugli ultimi secondi (10/20/30/60 s, da *Opzioni*). Mentre regoli limiter, EQ o imager vedi subito l'effetto, senza premere Reset. In Live LRA e DR sono esclusi, perché descrivono il brano intero. Il bilanciamento tonale della finestra (spesso un ritornello in loop) viene confrontato con la **sezione più forte** del reference, non con il brano intero.
 - **Confronto tonale** (da *Opzioni*): sul brano intero oppure solo sulle sezioni più forti (ritornello/drop) di master e target. Il secondo è più affidabile quando intro, strofe e breakdown dei due brani sono arrangiati in modo diverso.
 
-### Analizzare un file come master
-Invece di riprodurre il brano nella DAW, puoi far analizzare direttamente il bounce: *Opzioni → Analizza un file come master…*, oppure trascina il file sulla finestra e scegli *Analizza come master*.
-- L'analisi del brano intero richiede pochi secondi (stesso motore, letto a blocchi senza caricare il file in memoria).
-- Un banner mostra l'avanzamento; finita l'analisi la dashboard mostra il file (badge **FILE**) al posto dell'ingresso live, che intanto continua a essere analizzato. Clic sul banner per tornare al live.
-- Il percorso del file è salvato nel progetto: alla riapertura viene rianalizzato.
+### App standalone: analizzare un brano
+Avvia `MasterAgent.exe` e scegli **Analizza un brano** (oppure trascina il file sulla finestra). L'analisi del brano intero richiede pochi secondi, con lo stesso motore del plugin. Sopra la dashboard compare la **forma d'onda** del brano con i problemi segnati nel punto in cui avvengono:
+- **Clipping** (quadrato): plateau di campioni identici, gli stessi eventi contati nel report.
+- **True peak oltre il ceiling** del target (triangolo).
+- **Buchi di silenzio digitale** (cerchio): campioni a zero subito dopo audio udibile, tipici di un taglio di editing o di una regione mancante. I silenzi all'inizio, alla fine e dopo una dissolvenza non vengono segnalati.
+- **Sezioni troppo compresse** (fascia gialla): PSR sotto il minimo del target. Sul mix bus il controllo è spento, come nel report.
+- **Fase invertita** (fascia rossa): correlazione negativa per almeno un secondo.
+
+Clic sulla forma d'onda per ascoltare da quel punto (barra spaziatrice = play/pausa; l'uscita si sceglie in *Options* in alto a sinistra). Clic su un segno per ascoltarlo da 2 secondi prima, per **ignorarlo** (es. un clipper voluto) o per ignorare tutti i segni dello stesso tipo; lo stesso si fa cliccando una voce della legenda. I segni ignorati restano in grigio e valgono finché il brano resta aperto (non vengono salvati). Le soglie seguono il target attivo e la fase Mix/Master. **Nuova analisi** torna alla schermata iniziale.
 
 ### Versioni del master
 Per sapere se una correzione ha davvero migliorato il master:
@@ -60,12 +68,12 @@ Per sapere se una correzione ha davvero migliorato il master:
 Una diagnosi migliora se scende di gravità o, a parità di gravità, si avvicina al range in modo apprezzabile. La versione confrontata compare anche sullo spettro (puntinato grigio) e sulla cronologia della loudness (linea grigia tenue). Con il selettore *Confronta con* scegli la versione; da *Opzioni → Versioni* puoi rinominarla o eliminarla. Si tengono le ultime 8 versioni, salvate nel progetto (pochi KB l'una).
 
 ### Coerenza album
-Per un album, un EP o una serie di singoli: *Opzioni → Controlla coerenza album…*, oppure trascina 2-30 file sulla finestra e scegli *Controlla la coerenza dell'album*. I brani vengono analizzati in background, uno alla volta; poi un pannello sopra la dashboard confronta ogni brano con la **mediana dell'album**. La mediana, al contrario della media, non si sposta per un solo brano fuori posto, che così risulta segnalato da solo.
+Nell'app standalone, per un album, un EP o una serie di singoli: **Confronta più brani (album)** nella schermata iniziale, oppure trascina 2-30 file sulla finestra. I brani vengono analizzati in background, uno alla volta; poi la tabella confronta ogni brano con la **mediana dell'album**. La mediana, al contrario della media, non si sposta per un solo brano fuori posto, che così risulta segnalato da solo.
 - **Sezione più forte** (max short-term, cioè ritornello o drop): oltre ±1,5 LU dalla mediana è da verificare, oltre ±3 LU è critico. La colonna *Gain* indica di quanto alzare o abbassare il brano; se il true peak non lascia spazio, il consiglio è spingere il limiter. L'integrated è solo informativa: le ballate possono essere volutamente più basse.
 - **Bilanciamento tonale** per banda rispetto alla curva mediana dell'album, confrontando i ritornelli quando tutti i brani ne hanno uno. La tolleranza è di almeno 1,5 dB, più larga su Sub e Air. Le bande vicine spostate nella stessa direzione diventano una sola diagnosi con la correzione (shelf o campana larga, al massimo ±4 dB: oltre conviene intervenire nel mix).
 - **Ceiling true peak** diverso di oltre 1 dB e **larghezza stereo** diversa di oltre 8 punti: note informative (in azzurro).
 
-Clic su una riga per vedere a destra le diagnosi del brano e il suo tonale rispetto all'album; doppio clic (o *Mostra nella dashboard*) per aprirlo nella dashboard come file master, con l'analisi completa sul target attivo. *Esporta* salva la tabella come testo, CSV o immagine. I risultati restano nel plugin finché non premi *Svuota* (non sono salvati nel progetto); *Chiudi* torna alla dashboard e il pannello si riapre da *Opzioni*. Dalla riga di comando: `MasterAgentAnalyze --album brano1.wav brano2.wav ...`.
+Clic su una riga per vedere a destra le diagnosi del brano e il suo tonale rispetto all'album; doppio clic (o *Mostra nella dashboard*) per aprirlo nella dashboard con l'analisi completa sul target attivo, la forma d'onda e l'ascolto. Il pulsante **Album** in alto riporta alla tabella. *Esporta* salva la tabella come testo, CSV o immagine. I risultati restano in memoria finché non premi *Svuota*; *Chiudi* torna alla schermata iniziale. Dalla riga di comando: `MasterAgentAnalyze --album brano1.wav brano2.wav ...`.
 
 ### Spettro Mid/Side
 Il selettore **L+R | M/S** in alto a sinistra sullo spettro passa alla vista Mid/Side: Mid (ciò che sta al centro) e Side (la differenza tra i canali).

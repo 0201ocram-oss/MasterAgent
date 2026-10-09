@@ -30,6 +30,8 @@ void TechnicalChecks::reset()
     flatRun = { 0, 0 };
     fullScaleRun = { 0, 0 };
     inClip = { false, false };
+    openClip = { -1, -1 };
+    samplePos = 0;
     clipEvents = 0;
     blockCounter = 0;
     blockSumSq = 0.0;
@@ -55,10 +57,23 @@ void TechnicalChecks::processClip (int ch, float x) noexcept
     const bool clipping = flatRun[c] >= kFlatTopRun || fullScaleRun[c] >= kFlatTopRun;
 
     if (clipping && ! inClip[c])
+    {
         ++clipEvents;
+        openClip[c] = -1;
+        if (clipLog != nullptr && clipLog->size() < TimelineRecorder::maxEvents)
+        {
+            openClip[c] = (long) clipLog->size();
+            clipLog->push_back ({ std::max (0LL, samplePos - (kFlatTopRun - 1)), samplePos + 1, ch });   // il plateau è iniziato prima
+        }
+    }
 
     inClip[c] = clipping || (inClip[c] && (flatRun[c] > 1 || fullScaleRun[c] > 0));
     lastSample[c] = x;
+
+    if (! inClip[c])
+        openClip[c] = -1;
+    else if (openClip[c] >= 0)
+        (*clipLog)[(size_t) openClip[c]].end = samplePos + 1;
 }
 
 void TechnicalChecks::process (const float* left, const float* right, int numSamples)
@@ -73,6 +88,7 @@ void TechnicalChecks::process (const float* left, const float* right, int numSam
         sum[0] += l;  sumSq[0] += (double) l * l;
         sum[1] += r;  sumSq[1] += (double) r * r;
 
+        samplePos = (long long) count + i;
         processClip (0, l);
         if (stereo)
             processClip (1, r);

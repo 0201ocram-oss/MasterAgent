@@ -5,6 +5,7 @@
 #include "LoudnessMeter.h"
 #include "SpectrumAnalyzer.h"
 #include "TechnicalChecks.h"
+#include "Timeline.h"
 #include "TruePeakMeter.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -32,9 +33,19 @@ public:
     void process (const float* left, const float* right, int numSamples, double songTime = std::numeric_limits<double>::quiet_NaN());
     void buildSnapshot (AnalysisSnapshot& s) const;
 
+    /**
+        Analisi offline di un file: registra anche la cronologia (forma d'onda e dove sono i problemi).
+        Da chiamare dopo prepare(); finishTimeline() completa timeline e smette di registrare.
+    */
+    void startTimeline (TrackTimeline& timeline, long long expectedLength);
+    void finishTimeline();
+
     double getSampleRate() const noexcept { return sampleRate; }
 
 private:
+    TrackTimeline* timeline = nullptr;
+    TimelineRecorder timelineRecorder;
+
     double sampleRate = 48000.0;
     int numChannels = 2;
     double samplesProcessed = 0.0;

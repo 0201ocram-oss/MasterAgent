@@ -157,6 +157,8 @@ void TruePeakMeter::process (const float* left, const float* right, int numSampl
         if (++recentBlockCounter >= recentBlockLength)
         {
             recentBlockMax[(size_t) recentBlockIndex] = currentBlockMax;
+            if (blockLog != nullptr)
+                blockLog->push_back (gainToDb (currentBlockMax));
             recentBlockIndex = (recentBlockIndex + 1) % (int) recentBlockMax.size();
             recentBlockCounter = 0;
             currentBlockMax = 0.0;

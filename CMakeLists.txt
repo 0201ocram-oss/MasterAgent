@@ -25,6 +25,7 @@ set(MASTERAGENT_CORE_SOURCES
     Source/Analysis/DynamicsAnalyzer.cpp
     Source/Analysis/SpectrumAnalyzer.cpp
     Source/Analysis/TechnicalChecks.cpp
+    Source/Analysis/Timeline.cpp
     Source/Analysis/StreamingPreview.cpp
     Source/Analysis/ReferenceAnalyzer.cpp
     Source/Analysis/SnapshotIO.cpp
@@ -89,7 +90,10 @@ target_sources(MasterAgent PRIVATE
     Source/UI/SpectrumPanel.cpp
     Source/UI/StereoPanel.cpp
     Source/UI/ReportPanel.cpp
-    Source/UI/AlbumView.cpp)
+    Source/UI/AlbumView.cpp
+    Source/UI/WaveformPanel.cpp
+    Source/UI/StartView.cpp
+    Source/Playback/FilePlayer.cpp)
 
 target_include_directories(MasterAgent PRIVATE Source)
 
@@ -132,7 +136,8 @@ if(MASTERAGENT_BUILD_TESTS)
         Tests/MixAnalysisTests.cpp
         Tests/ReportScoreTests.cpp
         Tests/SnapshotTests.cpp
-        Tests/AlbumTests.cpp)
+        Tests/AlbumTests.cpp
+        Tests/TimelineTests.cpp)
 
     target_include_directories(MasterAgentTests PRIVATE Source Tests)
 
@@ -170,6 +175,8 @@ if(MASTERAGENT_BUILD_TESTS)
         Source/UI/StereoPanel.cpp
         Source/UI/ReportPanel.cpp
         Source/UI/AlbumView.cpp
+        Source/UI/WaveformPanel.cpp
+        Source/UI/StartView.cpp
         tools/Preview.cpp)
 
     target_include_directories(MasterAgentPreview PRIVATE Source)

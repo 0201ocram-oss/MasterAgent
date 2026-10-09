@@ -57,6 +57,8 @@ void AnalysisEngine::process (const float* left, const float* right, int numSamp
     dynamics.process (left, right, numSamples);
     spectrum.process (left, right, numSamples, loudness.getShortTerm(), chunkTime);
     technical.process (left, right, numSamples);
+    if (timeline != nullptr)
+        timelineRecorder.process (left, right, numSamples);
     samplesProcessed += numSamples;
     nextSongTime = chunkTime + numSamples / sampleRate;
 
@@ -76,6 +78,26 @@ void AnalysisEngine::process (const float* left, const float* right, int numSamp
             }
         }
     }
+}
+
+void AnalysisEngine::startTimeline (TrackTimeline& t, long long expectedLength)
+{
+    timeline = &t;
+    timelineRecorder.start (t, sampleRate, numChannels, expectedLength);
+    technical.setClipLog (&t.clips);
+    truePeak.setBlockLog (&t.truePeakDb);
+}
+
+void AnalysisEngine::finishTimeline()
+{
+    if (timeline == nullptr)
+        return;
+
+    timelineRecorder.finish();
+    timeline->shortTermLufs = loudness.getShortTermHistory();
+    technical.setClipLog (nullptr);
+    truePeak.setBlockLog (nullptr);
+    timeline = nullptr;
 }
 
 void AnalysisEngine::buildSnapshot (AnalysisSnapshot& s) const

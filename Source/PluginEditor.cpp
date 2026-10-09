@@ -44,7 +44,7 @@ private:
 
 //==============================================================================
 MasterAgentEditor::MasterAgentEditor (MasterAgentProcessor& p)
-    : AudioProcessorEditor (&p), processor (p)
+    : AudioProcessorEditor (&p), processor (p), standalone (p.isStandalone())
 {
     // le preferenze dell'interfaccia sono comuni a tutte le istanze: si caricano una volta sola
     if (getThemeVersion() == 0)
@@ -55,22 +55,60 @@ MasterAgentEditor::MasterAgentEditor (MasterAgentProcessor& p)
     content.addAndMakeVisible (header);
     for (auto* panel : allPanels())
         content.addAndMakeVisible (panel);
+    content.addChildComponent (waveformPanel);
     content.addChildComponent (albumView);
+    content.addChildComponent (startView);
 
-    albumView.onClose = [this] { showAlbum (false); };
+    // album (solo standalone): chiudendolo si torna alla schermata iniziale
+    albumView.onClose = [this] { showScreen (Screen::start); };
     albumView.onClear = [this]
     {
         processor.clearAlbum();
-        showAlbum (false);
+        showScreen (Screen::start);
     };
     albumView.onExport = [this] { exportAlbum(); };
     albumView.onShowTrack = [this] (int index)
     {
         processor.useAlbumTrackAsMaster (index);
-        showAlbum (false);
+        resetIgnoredMarkers();
+        showScreen (Screen::track);
         updateComparison();
         pushDataToPanels();
     };
+
+    startView.onAnalyseTrack = [this] { chooseMasterFile(); };
+    startView.onCompareAlbum = [this] { chooseAlbumFiles(); };
+    startView.onShowAlbum = [this] { showScreen (Screen::album); };
+
+    waveformPanel.onSeek = [this] (double seconds) { processor.getPlayer().setPosition (seconds); };
+    waveformPanel.onPlayPause = [this] { togglePlayback(); };
+    waveformPanel.onListenFrom = [this] (double seconds)
+    {
+        auto& player = processor.getPlayer();
+        player.setPosition (seconds);
+        player.play();
+    };
+    waveformPanel.onIgnoreMarker = [this] (const Marker& marker, bool ignore)
+    {
+        if (ignore)
+            ignoredMarkerIds.insert (marker.id());
+        else
+            ignoredMarkerIds.erase (marker.id());
+        waveformPanel.setIgnored (ignoredMarkerIds, ignoredMarkerTypes);
+    };
+    waveformPanel.onIgnoreType = [this] (MarkerType type, bool ignore)
+    {
+        ignoredMarkerTypes[(size_t) type] = ignore;
+        waveformPanel.setIgnored (ignoredMarkerIds, ignoredMarkerTypes);
+    };
+
+    header.setStandalone (standalone);
+    header.onNewAnalysis = [this]
+    {
+        processor.clearMasterFile();
+        showScreen (Screen::start);
+    };
+    header.onShowAlbum = [this] { showScreen (Screen::album); };
 
     header.setListening (processor.listenReference.load());
     header.setLiveMode (processor.liveMode.load());
@@ -140,6 +178,13 @@ MasterAgentEditor::MasterAgentEditor (MasterAgentProcessor& p)
     refreshTargets();
     updateReferenceStatus();
 
+    // standalone: si parte dalla scelta tra brano e album (o dal brano già aperto)
+    if (standalone)
+    {
+        content.setWantsKeyboardFocus (true);
+        showScreen (processor.getMasterFileState() != MasterAgentProcessor::MasterFileState::none ? Screen::track : Screen::start);
+    }
+
     setResizable (true, true);
     setSize (processor.editorWidth, processor.editorHeight);
     content.toBack();   // l'angolo di ridimensionamento resta sopra la dashboard
@@ -204,7 +249,8 @@ void MasterAgentEditor::applyZoom()
     const float previous = appliedZoom > 0.0f ? appliedZoom : zoom;
     appliedZoom = zoom;
 
-    const int minW = juce::roundToInt (minWidth * zoom), minH = juce::roundToInt (minHeight * zoom);
+    const int minW = juce::roundToInt (minWidth * zoom);
+    const int minH = juce::roundToInt ((standalone ? minHeightStandalone : minHeight) * zoom);
     setResizeLimits (minW, minH, 4000, 2600);
 
     // stessa dimensione logica di prima, senza superare l'area utile dello schermo
@@ -250,8 +296,13 @@ void MasterAgentEditor::paintDashboard (juce::Graphics& g)
         if (getUiSettings().effects)
         {
             const juce::DropShadow shadow (colours::shadow, 14, { 0, 4 });
-            for (auto* panel : allPanels())
+            const auto dashboardPanels = allPanels();
+            auto panels = std::vector<Panel*> (dashboardPanels.begin(), dashboardPanels.end());
+            panels.push_back (&waveformPanel);
+            for (auto* panel : panels)
             {
+                if (! panel->isVisible())
+                    continue;
                 juce::Path p;
                 p.addRoundedRectangle (panel->getBounds().toFloat(), 10.0f);
                 shadow.drawForPath (bg, p);
@@ -261,44 +312,20 @@ void MasterAgentEditor::paintDashboard (juce::Graphics& g)
 
     g.drawImageTransformed (backgroundCache, juce::AffineTransform::scale (1.0f / backgroundScale));
 
-    if (hasFileBanner())
-    {
-        const auto banner = bannerArea (0).toFloat();
-        const auto state = processor.getMasterFileState();
-        const auto name = processor.getMasterFile().getFileName();
-        const bool failed = state == MasterAgentProcessor::MasterFileState::failed;
-
-        g.setGradientFill (juce::ColourGradient ((failed ? colours::critical : colours::accent2).darker (0.55f), banner.getX(), 0.0f,
-                                                 colours::accent.darker (0.75f), banner.getRight(), 0.0f, false));
-        g.fillRect (banner);
-        g.setColour (juce::Colours::white);
-        g.setFont (fonts::value (13.0f));
-
-        juce::String text;
-        if (state == MasterAgentProcessor::MasterFileState::analysing)
-            text = "ANALISI DEL FILE"_t + "  " + name + "  " + juce::String (juce::roundToInt (processor.getMasterFileProgress() * 100.0f)) + "%   -   "
-                 + "al termine la dashboard mostrerà il file al posto dell'ingresso live (clic per annullare)"_t;
-        else if (failed)
-            text = "ERRORE NELL'ANALISI DI"_t + "  " + name + ": " + processor.getMasterFileError() + "   -   " + "clic per chiudere"_t;
-        else
-            text = "FILE"_t + "  " + name + "   -   " + "analisi offline del brano intero al posto dell'ingresso live"_t + "   -   "
-                 + "clic qui per tornare al live"_t;
-        g.drawText (text, banner.reduced (12.0f, 0.0f), juce::Justification::centred);
-    }
-
     if (processor.listenReference.load())
     {
-        auto banner = bannerArea (hasFileBanner() ? 1 : 0).toFloat();
+        auto banner = bannerArea (0).toFloat();
         g.setGradientFill (juce::ColourGradient (colours::reference.darker (0.45f), banner.getX(), 0.0f,
                                                  colours::accent2.darker (0.6f), banner.getRight(), 0.0f, false));
         g.fillRect (banner);
         g.setColour (juce::Colours::white);
         g.setFont (fonts::value (13.0f));
         const float gainDb = juce::Decibels::gainToDecibels (processor.referenceGain.load());
-        g.drawText ("ASCOLTO REFERENCE ATTIVO  -  l'uscita del plugin è il brano di riferimento (gain match "_u
-                        + juce::String (gainDb, 1) + " dB su "
-                        + (processor.abMatchLoudestSection.load() ? "sezione più forte"_u : juce::String ("loudness integrata"))
-                        + "). Disattivalo prima dell'export!",
+        const auto match = juce::String (gainDb, 1) + " dB su "
+                         + (processor.abMatchLoudestSection.load() ? "sezione più forte"_u : juce::String ("loudness integrata"));
+        g.drawText (standalone ? "ASCOLTO REFERENCE ATTIVO  -  stai ascoltando il brano di riferimento (gain match "_t + match + ")"
+                               : "ASCOLTO REFERENCE ATTIVO  -  l'uscita del plugin è il brano di riferimento (gain match "_u
+                                     + match + "). Disattivalo prima dell'export!",
                     banner, juce::Justification::centred);
     }
 }
@@ -314,7 +341,10 @@ void MasterAgentEditor::paintDragOverlay (juce::Graphics& g)
     g.setColour (colours::reference);
     g.drawRoundedRectangle (bounds.toFloat().reduced (6.0f), 12.0f, 2.0f);
     g.setFont (fonts::value (24.0f));
-    g.drawText ("Rilascia i file: uno come reference o master, più file per l'album o un profilo"_t, bounds, juce::Justification::centred);
+    g.drawText (standalone ? (screen == Screen::start ? "Rilascia i file: uno da analizzare, più file per confrontarli come album"_t
+                                                      : "Rilascia i file: uno da analizzare o come reference, più file per l'album o un profilo"_t)
+                           : "Rilascia i file: uno come reference, più file per creare un profilo"_t,
+                bounds, juce::Justification::centred);
 }
 
 void MasterAgentEditor::layoutDashboard()
@@ -324,6 +354,7 @@ void MasterAgentEditor::layoutDashboard()
     auto r = content.getLocalBounds();
     header.setBounds (r.removeFromTop (headerHeight));
     r.removeFromTop (bannerHeight * bannerCount());
+    startView.setBounds (r);
 
     r = r.reduced (12);
     constexpr int gap = 12;
@@ -331,6 +362,13 @@ void MasterAgentEditor::layoutDashboard()
 
     reportPanel.setBounds (r.removeFromRight ((int) (r.getWidth() * 0.27f)));
     r.removeFromRight (gap);
+
+    // standalone: la forma d'onda del brano sopra i pannelli di misura
+    if (standalone)
+    {
+        waveformPanel.setBounds (r.removeFromTop (std::max (150, (int) (r.getHeight() * 0.19f))));
+        r.removeFromTop (gap);
+    }
 
     auto row1 = r.removeFromTop ((int) (r.getHeight() * 0.34f));
     r.removeFromTop (gap);
@@ -352,14 +390,9 @@ void MasterAgentEditor::layoutDashboard()
     streamingPanel.setBounds (row3);
 }
 
-bool MasterAgentEditor::hasFileBanner() const
-{
-    return processor.getMasterFileState() != MasterAgentProcessor::MasterFileState::none;
-}
-
 int MasterAgentEditor::bannerCount() const
 {
-    return (hasFileBanner() ? 1 : 0) + (processor.listenReference.load() ? 1 : 0);
+    return processor.listenReference.load() ? 1 : 0;
 }
 
 juce::Rectangle<int> MasterAgentEditor::bannerArea (int index) const
@@ -367,15 +400,15 @@ juce::Rectangle<int> MasterAgentEditor::bannerArea (int index) const
     return { 0, headerHeight + index * bannerHeight, content.getWidth(), bannerHeight };
 }
 
-void MasterAgentEditor::contentClicked (juce::Point<int> position)
+bool MasterAgentEditor::contentKeyPressed (const juce::KeyPress& key)
 {
-    if (! hasFileBanner() || ! bannerArea (0).contains (position))
-        return;
-
-    // clic sul banner del file: annulla l'analisi o torna all'ingresso live
-    processor.clearMasterFile();
-    layoutDashboard();
-    content.repaint();
+    // barra spaziatrice: play/pausa del brano (standalone)
+    if (standalone && screen == Screen::track && key == juce::KeyPress::spaceKey)
+    {
+        togglePlayback();
+        return true;
+    }
+    return false;
 }
 
 //==============================================================================
@@ -587,19 +620,26 @@ void MasterAgentEditor::pushDataToPanels()
 {
     for (auto* panel : allPanels())
         panel->setData (data);
+    waveformPanel.setData (data);
     albumView.setData (data);
 }
 
 void MasterAgentEditor::timerCallback()
 {
-    // sorgente del master: un file analizzato offline (se pronto) oppure l'ingresso live
-    processor.updateMasterFile();
-    const bool fromFile = processor.getMasterFileSnapshot (data.master);
-    if (! fromFile)
+    // sorgente del master: il brano analizzato (standalone) oppure l'ingresso del plugin (DAW)
+    if (standalone)
+    {
+        processor.updateMasterFile();
+        data.masterFromFile = processor.getMasterFileSnapshot (data.master);
+        if (! data.masterFromFile && data.master.valid)
+            data.master = {};
+        data.masterFileName = processor.getMasterFile().getFileName();
+        updateWaveform();
+    }
+    else
+    {
         processor.getLiveAnalysis().getSnapshot (data.master);
-    data.masterFromFile = fromFile;
-    data.masterFileName = fromFile ? processor.getMasterFile().getFileName() : juce::String();
-    header.setModeEnabled (! fromFile);
+    }
 
     if (const int banners = bannerCount(); banners != lastBannerCount)
     {
@@ -624,13 +664,14 @@ void MasterAgentEditor::timerCallback()
     header.setLiveMode (processor.liveMode.load());
     header.setMixPhase (processor.mixPhase.load());
 
-    updateAlbumView();
+    if (standalone)
+        updateAlbumView();
 
     if (tick++ % 4 == 0)
     {
         pollMultiReference();
         updateComparison();
-        if (! albumVisible)
+        if (screen == Screen::track)
         {
             reportPanel.setData (data);
             streamingPanel.setData (data);
@@ -639,8 +680,8 @@ void MasterAgentEditor::timerCallback()
             content.repaint (0, headerHeight, content.getWidth(), bannerHeight * bannerCount());
     }
 
-    // con il pannello album aperto la dashboard è coperta: non serve ridisegnarla
-    if (! albumVisible)
+    // con l'album o la schermata iniziale la dashboard è nascosta: non serve ridisegnarla
+    if (screen == Screen::track)
         for (auto* panel : { (Panel*) &loudnessPanel, (Panel*) &peakPanel, (Panel*) &dynamicsPanel, (Panel*) &spectrumPanel, (Panel*) &stereoPanel })
             panel->setData (data);
 }
@@ -664,31 +705,121 @@ void MasterAgentEditor::updateAlbumView()
             albumView.setAlbum ({}, {});
         }
 
-        if (state == MasterAgentProcessor::AlbumState::none && albumVisible)
-            showAlbum (false);
+        const bool available = state != MasterAgentProcessor::AlbumState::none;
+        header.setAlbumAvailable (available, screen == Screen::album);
+        startView.setAlbumAvailable (state == MasterAgentProcessor::AlbumState::ready, (int) processor.getAlbum().snapshots.size());
+        if (! available && screen == Screen::album)
+            showScreen (Screen::start);
     }
 
     if (state == MasterAgentProcessor::AlbumState::analysing)
         albumView.setProgress (true, processor.getAlbumStatusText(), processor.getAlbumProgress());
 }
 
-void MasterAgentEditor::showAlbum (bool on)
+void MasterAgentEditor::showScreen (Screen newScreen)
 {
-    albumVisible = on;
-    albumView.setVisible (on);
-    for (auto* panel : allPanels())
-        panel->setVisible (! on);
+    screen = newScreen;
+    const bool track = screen == Screen::track;
 
-    if (on)
-    {
+    startView.setVisible (screen == Screen::start);
+    albumView.setVisible (screen == Screen::album);
+    for (auto* panel : allPanels())
+        panel->setVisible (track);
+    waveformPanel.setVisible (track && standalone);
+
+    if (! track)
+        processor.getPlayer().pause();
+    else if (standalone && content.isShowing())
+        content.grabKeyboardFocus();   // barra spaziatrice = play/pausa
+    if (screen == Screen::album)
         albumView.toFront (false);
-        albumView.setData (data);
-    }
-    else
-    {
-        pushDataToPanels();
-    }
+
+    header.setAlbumAvailable (processor.getAlbumState() != MasterAgentProcessor::AlbumState::none, screen == Screen::album);
+    header.setNewAnalysisEnabled (screen != Screen::start);
+    pushDataToPanels();
+    backgroundCache = {};   // le ombre seguono i pannelli visibili
     content.repaint();
+}
+
+void MasterAgentEditor::startTrackAnalysis (const juce::File& file)
+{
+    processor.analyseMasterFile (file);
+    resetIgnoredMarkers();
+    showScreen (Screen::track);
+}
+
+void MasterAgentEditor::resetIgnoredMarkers()
+{
+    ignoredMarkerIds.clear();
+    ignoredMarkerTypes.fill (false);
+    waveformPanel.setIgnored (ignoredMarkerIds, ignoredMarkerTypes);
+}
+
+void MasterAgentEditor::togglePlayback()
+{
+    auto& player = processor.getPlayer();
+    if (player.isPlaying())
+        player.pause();
+    else
+        player.play();
+}
+
+MarkerSettings MasterAgentEditor::currentMarkerSettings() const
+{
+    // stesse soglie del report: ceiling del profilo e PSR minimo (che sul mix bus non si valuta)
+    MarkerSettings settings;
+    if (processor.getWorkPhase() == WorkPhase::master && data.profile != nullptr)
+    {
+        if (const auto* tp = data.profile->getMetric (metric::truePeakMax))
+            settings.ceilingDb = tp->max;
+        if (const auto* psr = data.profile->getMetric (metric::minPsr))
+            settings.minPsr = psr->min;
+    }
+    return settings;
+}
+
+void MasterAgentEditor::updateWaveform()
+{
+    const auto state = processor.getMasterFileState();
+
+    // analisi non riuscita: si torna alla schermata iniziale con il motivo
+    if (state == MasterAgentProcessor::MasterFileState::failed)
+    {
+        const auto name = processor.getMasterFile().getFileName();
+        const auto error = processor.getMasterFileError();
+        processor.clearMasterFile();
+        showScreen (Screen::start);
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Analisi non riuscita"_t,
+                                                name + (error.isNotEmpty() ? ": " + error : juce::String()));
+        return;
+    }
+
+    if (state == MasterAgentProcessor::MasterFileState::analysing)
+        waveformPanel.setStatus ("Analisi di %s"_t.replace ("%s", processor.getMasterFile().getFileName()) + "   "
+                                     + juce::String (juce::roundToInt (processor.getMasterFileProgress() * 100.0f)) + "%",
+                                 processor.getMasterFileProgress());
+    else
+        waveformPanel.setStatus ({}, -1.0f);
+
+    if (auto timeline = processor.getMasterFileTimeline(); timeline != shownTimeline)
+    {
+        shownTimeline = std::move (timeline);
+        waveformPanel.setTimeline (shownTimeline);
+        markersDirty = true;
+    }
+
+    // i segni dipendono dal profilo e dalla fase: si ricalcolano quando cambiano le soglie
+    const auto settings = currentMarkerSettings();
+    if (markersDirty || ! juce::approximatelyEqual (settings.ceilingDb, shownMarkerSettings.ceilingDb)
+        || ! juce::approximatelyEqual (settings.minPsr, shownMarkerSettings.minPsr))
+    {
+        markersDirty = false;
+        shownMarkerSettings = settings;
+        waveformPanel.setMarkers (shownTimeline != nullptr ? findMarkers (*shownTimeline, settings) : std::vector<Marker>());
+    }
+
+    const auto& player = processor.getPlayer();
+    waveformPanel.setPlayback (player.getPosition(), player.isPlaying());
 }
 
 void MasterAgentEditor::chooseAlbumFiles()
@@ -728,7 +859,7 @@ void MasterAgentEditor::startAlbumCheck (const juce::Array<juce::File>& files)
 
     processor.startAlbumCheck (sorted);
     updateAlbumView();
-    showAlbum (true);
+    showScreen (Screen::album);
 }
 
 void MasterAgentEditor::exportAlbum()
@@ -794,12 +925,16 @@ void MasterAgentEditor::showOptionsMenu()
                             [this, seconds] { processor.setLiveMode (processor.liveMode.load(), seconds); });
 
     juce::PopupMenu menu;
-    menu.addSectionHeader ("Analisi");
-    menu.addItem ("Auto-reset quando il play parte dall'inizio", true, processor.autoResetOnPlay.load(),
-                  [this] { processor.autoResetOnPlay.store (! processor.autoResetOnPlay.load()); });
-    menu.addItem ("Analizza solo durante la riproduzione", true, processor.analyseOnlyWhilePlaying.load(),
-                  [this] { processor.analyseOnlyWhilePlaying.store (! processor.analyseOnlyWhilePlaying.load()); });
-    menu.addSubMenu ("Finestra modalità Live"_u, windowMenu);
+    // l'analisi dell'ingresso esiste solo nella DAW
+    if (! standalone)
+    {
+        menu.addSectionHeader ("Analisi");
+        menu.addItem ("Auto-reset quando il play parte dall'inizio", true, processor.autoResetOnPlay.load(),
+                      [this] { processor.autoResetOnPlay.store (! processor.autoResetOnPlay.load()); });
+        menu.addItem ("Analizza solo durante la riproduzione", true, processor.analyseOnlyWhilePlaying.load(),
+                      [this] { processor.analyseOnlyWhilePlaying.store (! processor.analyseOnlyWhilePlaying.load()); });
+        menu.addSubMenu ("Finestra modalità Live"_u, windowMenu);
+    }
     menu.addSectionHeader ("Confronto tonale");
     menu.addItem ("Brano intero (in Live: sezione più forte del target)"_u, true, ! processor.tonalLoudestSection.load(),
                   [this] { processor.tonalLoudestSection.store (false); });
@@ -811,9 +946,6 @@ void MasterAgentEditor::showOptionsMenu()
     menu.addItem ("Allinea il livello sulla sezione più forte (ritornello/drop)"_u, true, processor.abMatchLoudestSection.load(),
                   [this] { processor.abMatchLoudestSection.store (true); });
     menu.addSectionHeader ("Master"_t);
-    menu.addItem ("Analizza un file come master..."_t, [this] { chooseMasterFile(); });
-    if (hasFileBanner())
-        menu.addItem ("Torna all'ingresso live"_t, [this] { contentClicked (bannerArea (0).getCentre()); });
 
     {
         const int numVersions = processor.getNumVersions();
@@ -836,10 +968,14 @@ void MasterAgentEditor::showOptionsMenu()
         menu.addSubMenu ("Versioni"_t + " (" + juce::String (numVersions) + ")", versionsMenu);
     }
 
-    menu.addSectionHeader ("Album"_t);
-    menu.addItem ("Controlla coerenza album..."_t, [this] { chooseAlbumFiles(); });
-    if (processor.getAlbumState() != MasterAgentProcessor::AlbumState::none)
-        menu.addItem (albumVisible ? "Nascondi coerenza album"_t : "Mostra coerenza album"_t, [this] { showAlbum (! albumVisible); });
+    // brano e album da file: solo nell'app standalone
+    if (standalone)
+    {
+        menu.addSectionHeader ("Album"_t);
+        menu.addItem ("Controlla coerenza album..."_t, [this] { chooseAlbumFiles(); });
+        if (processor.getAlbumState() != MasterAgentProcessor::AlbumState::none && screen != Screen::album)
+            menu.addItem ("Mostra coerenza album"_t, [this] { showScreen (Screen::album); });
+    }
 
     menu.addSeparator();
     menu.addItem ("Crea profilo da più brani di riferimento..."_u, profileJob.getState() != BatchAnalysisJob::State::running,
@@ -925,38 +1061,50 @@ void MasterAgentEditor::filesDropped (const juce::StringArray& files, juce::Poin
     for (const auto& f : files)
         dropped.add (juce::File (f));
 
-    // un file può essere il reference o il master da analizzare; più file diventano un profilo
+    // schermata iniziale: un file si analizza, più file si confrontano come album
+    if (standalone && screen == Screen::start)
+    {
+        if (dropped.size() == 1)
+            startTrackAnalysis (dropped[0]);
+        else
+            startAlbumCheck (dropped);
+        return;
+    }
+
+    // un file: brano da analizzare (standalone) o reference; più file: album (standalone) o profilo
     juce::PopupMenu menu;
     if (dropped.size() == 1)
     {
         menu.addSectionHeader (dropped[0].getFileName());
+        if (standalone)
+            menu.addItem ("Analizza questo brano"_t, [this, file = dropped[0]] { startTrackAnalysis (file); });
         menu.addItem ("Usa come brano di riferimento"_t, [this, file = dropped[0]] { processor.loadReference (file); });
-        menu.addItem ("Analizza come master (brano intero, offline)"_t, [this, file = dropped[0]] { processor.analyseMasterFile (file); });
     }
     else
     {
         menu.addSectionHeader (juce::String (dropped.size()) + " " + "file"_t);
-        menu.addItem ("Controlla la coerenza dell'album"_t, [this, dropped] { startAlbumCheck (dropped); });
+        if (standalone)
+            menu.addItem ("Controlla la coerenza dell'album"_t, [this, dropped] { startAlbumCheck (dropped); });
         menu.addItem ("Crea un profilo da questi brani"_t, profileJob.getState() != BatchAnalysisJob::State::running, false,
                       [this, dropped] { startProfileJob (dropped); });
     }
 
-    const auto screen = content.localPointToGlobal (position);
+    const auto screenPos = content.localPointToGlobal (position);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&content)
-                                                  .withTargetScreenArea ({ screen.x, screen.y, 1, 1 }));
+                                                  .withTargetScreenArea ({ screenPos.x, screenPos.y, 1, 1 }));
 }
 
 void MasterAgentEditor::chooseMasterFile()
 {
     const auto current = processor.getMasterFile();
-    fileChooser = std::make_unique<juce::FileChooser> ("Scegli il file del master da analizzare"_t,
+    fileChooser = std::make_unique<juce::FileChooser> ("Scegli il brano da analizzare"_t,
                                                        current.existsAsFile() ? current.getParentDirectory() : juce::File(),
                                                        "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
     fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                               [this] (const juce::FileChooser& fc)
                               {
                                   if (const auto file = fc.getResult(); file.existsAsFile())
-                                      processor.analyseMasterFile (file);
+                                      startTrackAnalysis (file);
                               });
 }
 

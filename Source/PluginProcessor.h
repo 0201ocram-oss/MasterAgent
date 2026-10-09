@@ -5,6 +5,7 @@
 #include "Compare/AlbumCheck.h"
 #include "Compare/Comparator.h"
 #include "Compare/TargetProfile.h"
+#include "Playback/FilePlayer.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -45,6 +46,13 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     //==============================================================================
+    /**
+        App standalone: niente ingresso audio. Si analizzano file (un brano o un album) e il brano
+        si ascolta dal lettore interno. Nella DAW: analisi dell'ingresso (Brano intero / Live).
+    */
+    bool isStandalone() const noexcept { return standalone; }
+    ma::FilePlayer& getPlayer() noexcept { return player; }
+
     ma::LiveAnalysis& getLiveAnalysis() noexcept      { return liveAnalysis; }
     ma::ReferenceTrack& getReference() noexcept       { return reference; }
     ma::ProfileLibrary& getProfiles() noexcept        { return profiles; }
@@ -88,8 +96,8 @@ public:
 
     //==============================================================================
     /**
-        File analizzato come master (al posto dell'ingresso live, che intanto continua a essere analizzato).
-        L'analisi gira in background; il percorso è salvato nel progetto e il file viene rianalizzato alla riapertura.
+        Brano analizzato come master (app standalone). L'analisi gira in background e registra anche
+        la cronologia (forma d'onda e posizione dei problemi); il brano viene caricato nel lettore.
     */
     void analyseMasterFile (const juce::File& file);
     void clearMasterFile();
@@ -101,6 +109,7 @@ public:
     juce::File getMasterFile() const;
     juce::String getMasterFileError() const;
     bool getMasterFileSnapshot (ma::AnalysisSnapshot& dest) const;
+    std::shared_ptr<const ma::TrackTimeline> getMasterFileTimeline() const;
     float getMasterFileProgress() const noexcept { return masterFileJob.getProgress(); }
 
     //==============================================================================
@@ -152,6 +161,7 @@ public:
         std::vector<ma::AnalysisSnapshot> snapshots;
         juce::Array<juce::File> files;
         juce::StringArray names, skipped;
+        std::vector<std::shared_ptr<const ma::TrackTimeline>> timelines;
     };
     AlbumData getAlbum() const;
 
@@ -164,6 +174,10 @@ public:
     int editorWidth = 1440, editorHeight = 900;
 
 private:
+    static BusesProperties makeBuses (bool standaloneApp);
+
+    const bool standalone;
+    ma::FilePlayer player;
     ma::LiveAnalysis liveAnalysis;
     ma::ReferenceTrack reference;
     ma::ProfileLibrary profiles;
@@ -175,6 +189,7 @@ private:
     ma::BatchAnalysisJob masterFileJob;
     juce::File masterFile;
     ma::AnalysisSnapshot masterFileSnapshot;
+    std::shared_ptr<const ma::TrackTimeline> masterFileTimeline;
     MasterFileState masterFileState = MasterFileState::none;
     juce::String masterFileError;
 

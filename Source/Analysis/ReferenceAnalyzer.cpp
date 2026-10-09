@@ -4,7 +4,7 @@ namespace ma
 {
 
 bool analyseBuffer (const juce::AudioBuffer<float>& buffer, double sampleRate, AnalysisSnapshot& out,
-                    std::function<void (float)> progress, std::function<bool()> shouldCancel)
+                    std::function<void (float)> progress, std::function<bool()> shouldCancel, TrackTimeline* timeline)
 {
     const int numChannels = std::min (2, buffer.getNumChannels());
     const int numSamples = buffer.getNumSamples();
@@ -13,6 +13,8 @@ bool analyseBuffer (const juce::AudioBuffer<float>& buffer, double sampleRate, A
 
     AnalysisEngine engine;
     engine.prepare (sampleRate, numChannels);
+    if (timeline != nullptr)
+        engine.startTimeline (*timeline, numSamples);
 
     constexpr int chunk = 4096;
     for (int pos = 0; pos < numSamples; pos += chunk)
@@ -28,6 +30,7 @@ bool analyseBuffer (const juce::AudioBuffer<float>& buffer, double sampleRate, A
             progress ((float) pos / (float) numSamples);
     }
 
+    engine.finishTimeline();
     engine.buildSnapshot (out);
     if (progress)
         progress (1.0f);
@@ -56,7 +59,8 @@ namespace
 }
 
 bool analyseFile (const juce::File& file, AnalysisSnapshot& out, juce::String& error,
-                  std::function<void (float)> progress, std::function<bool()> shouldCancel, double maxSeconds)
+                  std::function<void (float)> progress, std::function<bool()> shouldCancel, double maxSeconds,
+                  TrackTimeline* timeline)
 {
     auto reader = openReader (file, error, maxSeconds);
     if (reader == nullptr)
@@ -67,6 +71,8 @@ bool analyseFile (const juce::File& file, AnalysisSnapshot& out, juce::String& e
 
     AnalysisEngine engine;
     engine.prepare (reader->sampleRate, numChannels);
+    if (timeline != nullptr)
+        engine.startTimeline (*timeline, length);
 
     // blocchi grandi per la lettura, poi gli stessi blocchi da 4096 di analyseBuffer
     constexpr int readSize = 65536, chunk = 4096;
@@ -93,6 +99,7 @@ bool analyseFile (const juce::File& file, AnalysisSnapshot& out, juce::String& e
             progress ((float) ((double) pos / (double) length));
     }
 
+    engine.finishTimeline();
     engine.buildSnapshot (out);
     if (progress)
         progress (1.0f);
@@ -126,13 +133,14 @@ BatchAnalysisJob::~BatchAnalysisJob()
     stopThread (4000);
 }
 
-void BatchAnalysisJob::start (const juce::Array<juce::File>& newFiles, const juce::String& newLabel)
+void BatchAnalysisJob::start (const juce::Array<juce::File>& newFiles, const juce::String& newLabel, bool withTimelines)
 {
     stopThread (4000);
     {
         std::lock_guard<std::mutex> lock (mutex);
         files = newFiles;
         label = newLabel;
+        timelinesWanted = withTimelines;
         results = {};
     }
     currentIndex.store (0);
@@ -172,9 +180,11 @@ BatchAnalysisJob::Results BatchAnalysisJob::takeResults()
 void BatchAnalysisJob::run()
 {
     juce::Array<juce::File> toAnalyse;
+    bool withTimelines = false;
     {
         std::lock_guard<std::mutex> lock (mutex);
         toAnalyse = files;
+        withTimelines = timelinesWanted;
     }
 
     for (int i = 0; i < toAnalyse.size() && ! threadShouldExit(); ++i)
@@ -184,9 +194,10 @@ void BatchAnalysisJob::run()
 
         juce::String error;
         AnalysisSnapshot snapshot;
+        auto timeline = withTimelines ? std::make_shared<TrackTimeline>() : nullptr;
 
         const bool ok = analyseFile (toAnalyse[i], snapshot, error, [this] (float p) { progress.store (p); },
-                                     [this] { return threadShouldExit(); });
+                                     [this] { return threadShouldExit(); }, 20.0 * 60.0, timeline.get());
 
         std::lock_guard<std::mutex> lock (mutex);
         if (ok && snapshot.integratedLufs > -70.0f)
@@ -194,6 +205,7 @@ void BatchAnalysisJob::run()
             results.snapshots.push_back (std::move (snapshot));
             results.files.add (toAnalyse[i]);
             results.names.add (toAnalyse[i].getFileName());
+            results.timelines.push_back (std::move (timeline));
         }
         else if (! threadShouldExit())
         {
