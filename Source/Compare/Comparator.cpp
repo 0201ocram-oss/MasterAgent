@@ -475,13 +475,20 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
         // low-end più mono del target: va bene
         if (key == metric::lowEndWidth && delta < 0.0f)
             sev = Severity::ok;
-        // nel mix l'LRA cambierà ancora con il mastering: al massimo da verificare
-        if (mix && key == metric::loudnessRange)
+        // l'LRA dipende soprattutto dall'arrangiamento (intro, breakdown) e nel mix cambierà ancora: al massimo da verificare
+        if (key == metric::loudnessRange)
+            sev = std::min (sev, Severity::warning);
+        // sulle piattaforme che normalizzano un master più forte viene solo abbassato: spreca dinamica, non è un errore
+        const bool turnedDown = key == metric::integratedLufs && profile.normalizationLufs.has_value() && delta > 0.0f;
+        if (turnedDown)
             sev = std::min (sev, Severity::warning);
 
         juce::String message ("Nel range.");
         if (sev != Severity::ok)
-            message = (delta > 0.0f ? text.whenHigh : text.whenLow)
+            message = (turnedDown ? "La piattaforma abbasserà il brano di circa " + fmt (it->second - *profile.normalizationLufs, 1, "dB")
+                                        + " (normalizzazione a " + fmt (*profile.normalizationLufs, 0, "LUFS") + "): non è un errore, "
+                                          "ma la dinamica sacrificata per il volume non ti restituisce niente. Valuta meno guadagno nel limiter."_u
+                                  : (delta > 0.0f ? text.whenHigh : text.whenLow))
                     + "  (" + signedFmt (delta, std::max (1, text.decimals), text.unit)
                     + (delta > 0.0f ? " sopra il massimo)" : " sotto il minimo)");
 
@@ -491,6 +498,38 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
 
     if (mix)
         addMixDeliveryChecks (s, list);
+
+    if (! mix)
+    {
+        // Un true peak molto sopra il picco dei campioni (clipping, limiting molto duro) gonfia PLR e PSR:
+        // il valore alto non è dinamica reale e "più densità" sarebbe il consiglio sbagliato.
+        const float samplePeak = std::max (s.samplePeakDb[0], s.samplePeakDb[1]);
+        const float overshoot = s.truePeakMaxDb - samplePeak;
+        if (samplePeak > kSilenceDb + 1.0f && overshoot > 1.0f)
+            for (auto& f : result.findings)
+                if ((f.key == highlight::plr || f.key == highlight::psr) && f.delta > 0.0f && f.severity >= Severity::warning)
+                {
+                    f.severity = Severity::info;
+                    f.message = "Valore alto solo in apparenza: il true peak supera di " + fmt (overshoot, 1, "dB")
+                              + " il picco dei campioni (picchi inter-campione tipici di clipping o limiting molto duro) e gonfia la misura. "
+                                "Non è dinamica in più: non aumentare la densità, guarda il DR e i plateau di clipping."_u;
+                }
+
+        // Spotify: sopra -14 LUFS conviene un true peak più basso, la codifica dei master forti genera picchi più alti
+        if (profile.normalizationLufs && profile.loudTruePeakMax
+            && s.integratedLufs > *profile.normalizationLufs && s.truePeakMaxDb > *profile.loudTruePeakMax)
+        {
+            if (auto* tp = list.find (highlight::truePeak); tp != nullptr && tp->severity < Severity::warning)
+            {
+                tp->severity = Severity::warning;
+                tp->delta = s.truePeakMaxDb - *profile.loudTruePeakMax;
+                tp->message = "Per i master più forti di " + fmt (*profile.normalizationLufs, 0, "LUFS") + " la piattaforma consiglia un true peak di "
+                            + fmt (*profile.loudTruePeakMax, 1, "dBTP") + ": nella codifica lossy i master forti generano picchi più alti. "
+                              "Abbassa il ceiling del limiter (modalità true peak)."_u
+                            + "  (" + signedFmt (tp->delta, 1, "dBTP") + " sopra il massimo)";
+            }
+        }
+    }
 
     // --- bilanciamento tonale -------------------------------------------------------
     if (profile.tonalCurve)
@@ -555,6 +594,14 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
             fit.maxMoves = mix ? 4 : 3;
             fit.minGainDb = mix ? 1.0f : 0.5f;
             auto moves = suggestEqMoves (result.tonalDelta, result.bandTolerance, fit);
+
+            // Una mossa corregge solo le bande che sposta verso il target. La stima per terzi d'ottava può attribuirle
+            // una banda già oltre il target (es. un low shelf per un sub quasi assente alza anche i bassi).
+            for (auto& m : moves)
+                m.bands.erase (std::remove_if (m.bands.begin(), m.bands.end(), [&] (int b)
+                {
+                    return result.bandTonalDelta[(size_t) b] * m.gainDb > 0.0f;
+                }), m.bands.end());
 
             // solo le mosse che correggono almeno una banda segnalata
             moves.erase (std::remove_if (moves.begin(), moves.end(), [&] (const EqMove& m)
@@ -646,9 +693,15 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
                 // eccesso costante (EQ statico), a raffiche (strumento dinamico) o concentrato in una sezione (automazione)?
                 const auto& dyn = s.bandDynamics[(size_t) b];
                 const float baseline = profile.bandBurstDb ? (*profile.bandBurstDb)[(size_t) b] : 1.5f;
-                // una sezione chiaramente più carica è l'indicazione più utile; altrimenti raffiche brevi (sibilanti, note)
+                // una sezione chiaramente più carica è l'indicazione più utile, ma solo se spiega almeno metà dello
+                // scostamento: quanto salirebbe la banda su tutto il brano per il solo eccesso di quella sezione
+                const float sectionShare = dyn.worstStartSec >= 0.0f
+                                         ? (dyn.worstEndSec - dyn.worstStartSec) / (float) std::max (1.0, s.secondsAnalyzed) : 0.0f;
+                const float sectionDb = 10.0f * std::log10 (1.0f + sectionShare * (std::pow (10.0f, dyn.worstExcessDb / 10.0f) - 1.0f));
+                // altrimenti raffiche brevi (sibilanti, note)
                 const bool oneSection = d > 0.0f && dyn.worstStartSec >= 0.0f && dyn.worstExcessDb >= std::max (3.0f, 0.5f * d)
-                                        && dyn.worstEndSec - dyn.worstStartSec <= 0.5f * (float) s.secondsAnalyzed;
+                                        && dyn.worstEndSec - dyn.worstStartSec <= 0.5f * (float) s.secondsAnalyzed
+                                        && sectionDb >= 0.5f * d;
                 const bool bursts = ! oneSection && d > 0.0f && dyn.burstDb - baseline >= std::max (1.0f, 0.5f * d);
                 const bool localised = d > 0.0f && dyn.worstStartSec >= 0.0f && dyn.worstExcessDb >= (bursts ? 2.0f : 3.0f);
                 const bool intermittent = bursts || oneSection;
@@ -789,19 +842,55 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
                       : "Picchi inter-campione sopra 0 dBTP: distorsione garantita in conversione D/A e codifica lossy. Usa un limiter true-peak.",
                   stage::loudness);
 
-    if (s.clipEvents > 0)
-        list.add (highlight::clip, "Peak", "Clipping digitale", juce::String (s.clipEvents) + " eventi", "0", (float) s.clipEvents,
-                  s.clipEvents > 20 ? Severity::critical : Severity::warning,
-                  mix ? "Rilevati plateau di campioni identici (onda squadrata): clipping. Controlla il gain staging (fader, gruppi, plugin che "
-                        "saturano) e non lasciare clipper o limiter sul mix da consegnare."_u
-                      : "Rilevati plateau di campioni identici (onda squadrata): clipping. Se non è voluto (clipper), riduci il guadagno a monte."_u,
+    const int fullScaleClips = std::clamp (s.clipEventsFullScale, 0, s.clipEvents);
+    const int ceilingClips = s.clipEvents - fullScaleClips;
+    if (fullScaleClips > 0)
+        list.add (highlight::clip, "Peak", "Clipping a fondo scala", juce::String (fullScaleClips) + " eventi", "0", (float) fullScaleClips,
+                  fullScaleClips > 20 ? Severity::critical : Severity::warning,
+                  mix ? "Plateau a fondo scala (onda squadrata a 0 dBFS): qualcosa sul mix supera il massimo. Controlla il gain staging (fader, "
+                        "gruppi, plugin che saturano) e lascia margine sul master fader."_u
+                      : "Plateau a fondo scala (onda squadrata a 0 dBFS): il segnale ha superato il massimo e i picchi sono stati tosati. "
+                        "Riduci il guadagno a monte e tieni il ceiling del limiter sotto 0 dBTP."_u,
                   stage::technical);
+
+    // Plateau sotto il fondo scala: il ceiling di un clipper o di un limiter molto rapido. Sono un difetto solo se
+    // tosano a lungo e spesso (distorsione udibile sui transienti), mai un sovraccarico che limita il voto.
+    if (ceilingClips > 0)
+    {
+        const double minutes = std::max (s.secondsAnalyzed / 60.0, 0.25);
+        const auto longPerMinute = (float) (s.longCeilingClips / minutes);
+        const auto where = s.ceilingClipDb > kSilenceDb + 1.0f ? " a " + fmt (s.ceilingClipDb, 1, "dBFS") : juce::String();
+        const auto count = juce::String (ceilingClips);
+
+        auto sev = Severity::info;
+        juce::String message;
+        if (mix)
+        {
+            sev = Severity::warning;
+            message = "Tetti piatti" + where + " su " + count + " picchi: sul mix c'è un clipper o un limiter che tosa. Va bene per sentire come "
+                      "suonerà il master, ma consegna il mix senza: il clipping si decide una volta sola, nel mastering."_u;
+        }
+        else if (longPerMinute >= 10.0f)
+        {
+            sev = Severity::warning;
+            message = "Tetti piatti" + where + ", con " + fmt (longPerMinute, 0) + " plateau lunghi al minuto: il clipper o il limiter al "
+                      "ceiling tosa molto e la distorsione può sentirsi sui transienti (rullante, kick, voce). Ascolta i punti segnati e "
+                      "confronta con 1-2 dB di guadagno in meno nel clipper."_u;
+        }
+        else
+        {
+            message = "Tetti piatti" + where + " su " + count + " picchi, quasi tutti di pochi campioni: è il lavoro di un clipper o di un "
+                      "limiter rapido al ceiling, normale nei master forti. Non è un sovraccarico."_u;
+        }
+        list.add (highlight::clip, "Peak", "Clipper al ceiling", count + " eventi", mix ? "0" : "< 10 plateau lunghi/min", (float) ceilingClips,
+                  sev, message, stage::technical);
+    }
 
     for (int ch = 0; ch < 2; ++ch)
     {
         const float dc = s.dcOffsetDb[(size_t) ch];
-        if (dc > -60.0f)
-            list.add (highlight::dc, "Tecnico", juce::String ("DC offset ") + (ch == 0 ? "L" : "R"), fmt (dc, 1, "dBFS"), "< -60 dBFS", dc + 60.0f,
+        if (dc > -50.0f)
+            list.add (highlight::dc, "Tecnico", juce::String ("DC offset ") + (ch == 0 ? "L" : "R"), fmt (dc, 1, "dBFS"), "< -50 dBFS", dc + 50.0f,
                       dc > -40.0f ? Severity::critical : Severity::warning,
                       "Componente continua presente: riduce l'headroom e crea click nei tagli. Applica un filtro DC/high-pass a 5-10 Hz.",
                       stage::technical);
@@ -818,8 +907,9 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
                       "Correlazione negativa: probabile canale con polarità invertita o forte problema di fase. In mono il brano perderà gran parte del segnale."_u,
                       stage::technical);
 
-        if (s.lowEndCorrelation < 0.8f)
-            list.add (highlight::lowEndWidth, "Stereo", "Correlazione sotto 100 Hz", fmt (s.lowEndCorrelation, 2), "> 0.80", s.lowEndCorrelation - 0.8f,
+        // nei master commerciali rock/pop è tipicamente 0.9-1; a 0.7-0.8 (basso con ambienza stereo) il mono perde meno di 1 dB
+        if (s.lowEndCorrelation < 0.7f)
+            list.add (highlight::lowEndWidth, "Stereo", "Correlazione sotto 100 Hz", fmt (s.lowEndCorrelation, 2), "> 0.70", s.lowEndCorrelation - 0.7f,
                       s.lowEndCorrelation < 0.4f ? Severity::critical : Severity::warning,
                       mix ? "Basse frequenze poco correlate: in mono e nei club il low-end perde energia. Cerca le tracce con bassi stereo "
                             "(synth bass con unison/chorus, riverberi, sample stereo) e rendile mono sotto i 100 Hz."_u
@@ -837,9 +927,10 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
                       s.monoLossDb < -6.0f ? Severity::critical : Severity::warning,
                       "Il livello cala molto sommando in mono (smartphone, altoparlanti Bluetooth, club): riduci l'ampiezza stereo.", stage::lowEnd);
 
-        if (std::abs (s.balanceDb) > 0.5f)
-            list.add (highlight::balance, "Stereo", "Bilanciamento L/R", fmt (s.balanceDb, 1, "dB"), juce::String::charToString (0x00B1) + "0.5 dB", s.balanceDb,
-                      std::abs (s.balanceDb) > 1.5f ? Severity::critical : Severity::warning,
+        // un arrangiamento asimmetrico sposta il bilanciamento di qualche decimo anche nei master commerciali
+        if (std::abs (s.balanceDb) > 1.0f)
+            list.add (highlight::balance, "Stereo", "Bilanciamento L/R", fmt (s.balanceDb, 1, "dB"), juce::String::charToString (0x00B1) + "1.0 dB", s.balanceDb,
+                      std::abs (s.balanceDb) > 2.0f ? Severity::critical : Severity::warning,
                       juce::String ("Il canale ") + (s.balanceDb > 0 ? "sinistro" : "destro") + " è più forte: verifica panning e bilanciamento del mix."_u,
                       stage::lowEnd);
     }

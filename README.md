@@ -37,6 +37,8 @@ Due modi di usarlo:
   - **A raffiche** (sibilanti, singole note che rimbombano, frasi aspre) → de-esser, EQ dinamico o multibanda (Savage, 4.4).
   - **Concentrata in una sezione** → automazione o EQ solo in quel punto.
 - **Dove**: quando l'eccesso è localizzato, la diagnosi indica il tratto del brano (es. "concentrato tra 1:32 e 1:48"). Con l'hover sulla diagnosi il tratto si illumina sulla cronologia della loudness. Il tempo è quello del transport della DAW, quindi è corretto anche se non parti dall'inizio.
+  - Si cerca solo nelle parti suonate a pieno: dissolvenze e intro quasi vuoti (per esempio solo hi-hat) sono esclusi.
+  - "Concentrato tra" compare solo se quel tratto spiega almeno metà dello scostamento della banda; altrimenti l'eccesso è considerato distribuito e il tratto è solo "più evidente".
 - **Note o risonanze**: i picchi stretti e persistenti vengono confrontati con la griglia delle note, dopo aver stimato l'intonazione.
   - Se coincidono con una nota portante del brano (tonica, basso, accordo principale) sono solo un'informazione, con il nome della nota (es. "La (A2)"): non vanno corretti con un EQ statico.
   - Gli altri sono **risonanze** da attenuare con un EQ stretto.
@@ -51,7 +53,9 @@ Due modi di usarlo:
 
 ### App standalone: analizzare un brano
 Avvia `MasterAgent.exe` e scegli **Analizza un brano** (oppure trascina il file sulla finestra). L'analisi del brano intero richiede pochi secondi, con lo stesso motore del plugin. Sopra la dashboard compare la **forma d'onda** del brano con i problemi segnati nel punto in cui avvengono:
-- **Clipping** (quadrato): plateau di campioni identici, gli stessi eventi contati nel report.
+- **Clipping** (quadrato): plateau di campioni identici, gli stessi eventi contati nel report. Nel report sono divisi in:
+  - **a fondo scala** (0 dBFS): il segnale ha superato il massimo. Oltre 20 eventi è critico;
+  - **al ceiling** di un clipper o di un limiter rapido (sotto 0 dBFS): è un'informazione, oppure "da verificare" se i plateau lunghi (oltre ~0,2 ms, distorsione udibile) superano 10 al minuto. Non limitano il voto.
 - **True peak oltre il ceiling** del target (triangolo).
 - **Buchi di silenzio digitale** (cerchio): campioni a zero subito dopo audio udibile, tipici di un taglio di editing o di una regione mancante. I silenzi all'inizio, alla fine e dopo una dissolvenza non vengono segnalati.
 - **Sezioni troppo compresse** (fascia gialla): PSR sotto il minimo del target. Sul mix bus il controllo è spento, come nel report.
@@ -87,7 +91,7 @@ Il selettore **L+R | M/S** in alto a sinistra sullo spettro passa alla vista Mid
 - **Da fare prima**: in cima al report ci sono al massimo 3 interventi prioritari.
 - **Pagella**: accanto al punteggio c'è un voto per area (Loudness e picchi, Dinamica, Tonale, Stereo, Tecnici).
   - Ogni misura valutata pesa allo stesso modo nella sua area: una critica pesa 2,5 volte una da verificare.
-  - Il punteggio è la media pesata dei voti (il tonale pesa un po' di più, lo stereo un po' meno). Un problema tecnico critico (clipping, fase invertita, canale muto) lo limita a 60.
+  - Il punteggio è la media pesata dei voti (il tonale pesa un po' di più, lo stereo un po' meno). Un problema tecnico critico (clipping a fondo scala, fase invertita, canale muto) lo limita a 60.
   - Clic su un'area per vedere solo le sue diagnosi; di nuovo per vederle tutte.
 - **Ignora diagnosi**: clic destro su una diagnosi → *Ignora: è una scelta voluta* (per esempio uno stereo molto largo voluto). Esce da voti, priorità e contatori, non colora più la dashboard e finisce in fondo tra le *Ignorate*. La scelta resta salvata nel progetto; si annulla con il clic destro o da *Opzioni*.
 - **Guida "?"** (in alto a destra): attivala e lascia il mouse fermo per un secondo su un valore, un grafico o una colonna. Compare cosa misura, come leggerlo e quali valori aspettarsi. Fuori dai valori, la guida spiega il pannello intero. Si attiva anche da *Opzioni*.
@@ -127,13 +131,16 @@ Durante un render offline il plugin attende l'analisi invece di perdere audio. U
 | Tonale | Spettro medio e istantaneo, terzi d'ottava rispetto alla curva target (brano intero e sezione più forte), scostamento su 8 bande, mosse EQ suggerite, tilt (dB/oct), centroide, energia sotto i 30 Hz, picchi stretti classificati come note (con intonazione e tonica stimate) o risonanze |
 | Nel tempo | Per ogni banda: quanto l'energia arriva a raffiche e la zona del brano in cui è più in eccesso |
 | Stereo | Correlazione istantanea, media e per banda; larghezza S/(M+S) globale e per banda; bilanciamento L/R; perdita in mono; goniometro |
-| Tecnici | Clipping (plateau di campioni), DC offset, noise floor, canale muto, fase invertita |
+| Tecnici | Clipping (plateau di campioni, a fondo scala o al ceiling di un clipper), DC offset, noise floor, canale muto, fase invertita |
 | Streaming | Guadagno che applicheranno Spotify, Apple Music, YouTube, Tidal, Amazon e Deezer, con la loudness e il true peak risultanti |
 
 ### Note sulla precisione
 - Loudness e LRA sono verificati sui casi di test EBU Tech 3341/3342: scarto ≤ 0.1 LU per la loudness e ≤ 1 LU per l'LRA, a 44.1, 48 e 96 kHz.
 - Il true peak è verificato su sinusoidi a fs/4 con fase a 45°, il caso peggiore per gli inter-sample peak. Scarto ≤ 0.15 dB.
-- **Le curve tonali dei profili di mercato sono modelli generici** (pendenza, enfasi sui bassi, roll-off). Per un riferimento tonale affidabile usa un reference o un profilo creato da uno o più reference.
+- **Le curve tonali dei profili di mercato sono medie di genere.** Rock e Pop (e i profili streaming, che usano la curva Pop) sono misurati su 150 master commerciali da CD (2001-2020): mediana per album, con una tolleranza per banda che lascia dentro l'85% dei brani. Hip-hop, EDM e Techno sono ancora modelli generici (pendenza, enfasi sui bassi, roll-off). Per un riferimento tonale affidabile usa un reference o un profilo creato da uno o più reference.
+- Le soglie stereo e tecniche sono tarate sugli stessi master: bilanciamento L/R da verificare oltre 1 dB (critico oltre 2), correlazione sotto 100 Hz da verificare sotto 0.70, DC offset oltre -50 dBFS, LRA al massimo "da verificare" perché dipende soprattutto dall'arrangiamento.
+- Sui profili streaming un master più forte del livello di normalizzazione è "da verificare", non critico: la piattaforma lo abbassa. Su Spotify, sopra -14 LUFS, il true peak consigliato è -2 dBTP.
+- Se il true peak supera di oltre 1 dB il picco dei campioni (clipping o limiting molto duro), un PLR o un PSR alti non sono dinamica reale: la diagnosi lo spiega invece di suggerire più densità.
 - Il confronto tonale allinea master e target sulla **mediana** degli scostamenti: un eccesso forte in una zona (es. sibilanti) non fa sembrare carenti tutte le altre bande. Gli intervalli di loudness e dinamica riflettono la prassi attuale del mercato e si possono modificare nei file JSON.
 - *Analizza solo in play* (attivo di default, in *Opzioni*) ignora l'audio quando il transport è fermo.
 - La trasparenza è verificata bit per bit sul VST3 reale: 44.1, 48 e 96 kHz; mono e stereo; blocchi da 1 a 4096 campioni e variabili. Il costo sull'audio thread è circa 0.05% del budget di un blocco da 256 campioni.

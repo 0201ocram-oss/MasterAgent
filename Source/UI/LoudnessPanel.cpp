@@ -299,9 +299,10 @@ void PeakPanel::paintContent (juce::Graphics& g, juce::Rectangle<float> area)
     row ("TP recente (3 s)", formatDb (s.recentTruePeakDb, 2) + " dBTP", colours::text, "recentTp");
     row ("Eventi > -1 dBTP", juce::String (s.overs1dB), s.overs1dB > 0 ? colours::warning : colours::ok, "overs1");
     row ("Eventi > 0 dBTP", juce::String (s.overs0dB), s.overs0dB > 0 ? colours::critical : colours::ok, highlight::overs);
-    row ("Clipping", juce::String (s.clipEvents) + " eventi", s.clipEvents > 0 ? colours::warning : colours::ok, highlight::clip);
+    row ("Clip (fondo scala)", juce::String (s.clipEvents) + " (" + juce::String (s.clipEventsFullScale) + ")",
+         s.clipEventsFullScale > 0 ? colours::critical : s.clipEvents > 0 ? colours::warning : colours::ok, highlight::clip);
     const float dc = std::max (s.dcOffsetDb[0], s.dcOffsetDb[1]);
-    row ("DC offset max", formatDb (dc) + " dBFS", dc > -60.0f ? colours::warning : colours::ok, highlight::dc);
+    row ("DC offset max", formatDb (dc) + " dBFS", dc > -50.0f ? colours::warning : colours::ok, highlight::dc);
     row ("Noise floor", formatDb (s.noiseFloorDb) + " dBFS", colours::text, "noiseFloor");
     row ("Sample rate", s.sampleRate > 0.0 ? juce::String (s.sampleRate / 1000.0, 1) + " kHz" : juce::String ("--"), colours::text, "sampleRate");
     if (d.hasReference)

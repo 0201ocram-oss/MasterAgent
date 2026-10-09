@@ -3,3 +3,6 @@ external/
 *.user
 .vs/
 metodi/
+MasterExample/
+__pycache__/
+ExportDaCD/

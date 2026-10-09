@@ -53,6 +53,10 @@ struct TargetProfile
     std::optional<std::array<float, kNumBands>> bandWidthPercent;
     float bandWidthTolerance = 10.0f;
 
+    // --- piattaforme con normalizzazione del volume ------------------------------------------------
+    std::optional<float> normalizationLufs;    // livello a cui la piattaforma riporta i brani (es. -14 LUFS)
+    std::optional<float> loudTruePeakMax;      // true peak consigliato per i master più forti di normalizationLufs
+
     // --- campi opzionali dei profili creati da brani di riferimento ------------------------------
     std::optional<std::array<float, kNumThirdOctaves>> tonalCurveLoudest;   // sola sezione più forte (ritornello/drop)
     std::optional<std::array<float, kNumBands>> bandTolerance;              // tolleranza tonale per banda (da più brani: dispersione reale)

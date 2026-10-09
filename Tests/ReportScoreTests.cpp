@@ -67,6 +67,7 @@ TEST_CASE ("Pagella: un problema tecnico critico limita il punteggio a 60", "[sc
 
     auto clipped = s;
     clipped.clipEvents = 50;
+    clipped.clipEventsFullScale = 50;
     const auto r = ma::compare (clipped, p);
 
     REQUIRE (findKey (r, ma::highlight::clip) != nullptr);

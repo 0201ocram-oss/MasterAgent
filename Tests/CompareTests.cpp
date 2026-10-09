@@ -57,7 +57,7 @@ TEST_CASE ("Un brano confrontato con se stesso non ha problemi di profilo", "[co
     }
 }
 
-TEST_CASE ("Master troppo forte per Spotify: integrated segnalato come critico", "[compare]")
+TEST_CASE ("Master troppo forte per Spotify: verrà abbassato, da verificare ma non critico", "[compare]")
 {
     ma::ProfileLibrary lib;
     const auto* spotify = lib.findById ("spotify");
@@ -71,11 +71,13 @@ TEST_CASE ("Master troppo forte per Spotify: integrated segnalato come critico",
         if (f.metric == "Integrated loudness")
         {
             found = true;
-            CHECK (f.severity == ma::Severity::critical);
+            CHECK (f.severity == ma::Severity::warning);
             CHECK (f.delta > 0.0f);
+            CHECK (f.message.contains ("abbasser"));
         }
     CHECK (found);
-    CHECK (result.findings.front().severity == ma::Severity::critical);   // ordinati per severità
+    for (size_t i = 1; i < result.findings.size(); ++i)   // ordinati per severità
+        CHECK (result.findings[i - 1].severity >= result.findings[i].severity);
 
     CHECK (ma::buildTextReport (s, result, spotify->name).contains ("Integrated"));
     CHECK (juce::JSON::parse (ma::buildJsonReport (s, result, spotify->name)).isObject());
@@ -106,6 +108,7 @@ namespace
         s.secondsAnalyzed = 180.0;
         s.integratedLufs = integrated;
         s.truePeakMaxDb = truePeak;
+        s.samplePeakDb = { truePeak - 0.3f, truePeak - 0.3f };
         s.plr = truePeak - integrated;
         s.minPsr = s.plr - 1.0f;
         s.loudnessRange = 5.0f;
@@ -186,4 +189,128 @@ TEST_CASE ("Ogni diagnosi ha una chiave per l'evidenziazione e le priorità non 
     for (size_t i = 0; i < result.priorities.size(); ++i)
         for (size_t j = i + 1; j < result.priorities.size(); ++j)
             CHECK (result.priorities[i].key != result.priorities[j].key);
+}
+
+//==============================================================================
+// Calibrazione su master commerciali (studio su 170 brani da CD, ottobre 2026)
+
+TEST_CASE ("Clipping al ceiling di un clipper: informazione o attenzione, mai un limite al voto", "[compare][clip]")
+{
+    ma::ProfileLibrary lib;
+    const auto& pop = *lib.findById ("pop");
+    auto s = fakeMaster (-7.5f, -1.0f);
+    s.clipEvents = 300;            // plateau di pochi campioni a -0.3 dBFS
+    s.clipEventsFullScale = 0;
+    s.longCeilingClips = 3;
+    s.ceilingClipDb = -0.3f;
+
+    auto r = ma::compare (s, pop);
+    const auto* clip = findKey (r, ma::highlight::clip);
+    REQUIRE (clip != nullptr);
+    INFO (clip->message.toStdString());
+    CHECK (clip->severity == ma::Severity::info);
+    CHECK (clip->message.contains ("-0.3 dBFS"));
+    CHECK (r.areas[(size_t) ma::Area::technical].critical == 0);
+
+    s.longCeilingClips = 200;      // 3 minuti: circa 67 plateau lunghi al minuto, distorsione udibile
+    r = ma::compare (s, pop);
+    clip = findKey (r, ma::highlight::clip);
+    REQUIRE (clip != nullptr);
+    CHECK (clip->severity == ma::Severity::warning);
+    CHECK (r.areas[(size_t) ma::Area::technical].critical == 0);
+
+    s.clipEventsFullScale = 50;    // a fondo scala: sovraccarico
+    r = ma::compare (s, pop);
+    bool fullScaleCritical = false;
+    for (const auto& f : r.findings)
+        fullScaleCritical = fullScaleCritical || (f.key == ma::highlight::clip && f.severity == ma::Severity::critical);
+    CHECK (fullScaleCritical);
+    CHECK (r.score <= 60);
+}
+
+TEST_CASE ("PLR gonfiato dai picchi inter-campione: nessun consiglio di aumentare la densità", "[compare]")
+{
+    ma::ProfileLibrary lib;
+    auto s = fakeMaster (-8.5f, 3.5f);     // true peak +3.5 dBTP...
+    s.samplePeakDb = { -0.1f, -0.1f };     // ...con i campioni a -0.1 dBFS: clipping, non dinamica
+    s.plr = 12.0f;
+
+    const auto r = ma::compare (s, *lib.findById ("pop"));
+    const auto* plr = findKey (r, ma::highlight::plr);
+    REQUIRE (plr != nullptr);
+    INFO (plr->message.toStdString());
+    CHECK (plr->severity == ma::Severity::info);
+    CHECK (plr->message.contains ("apparenza"));
+    for (const auto& p : r.priorities)
+        CHECK (p.group != "limiting:more");
+}
+
+TEST_CASE ("Spotify: sopra -14 LUFS il true peak consigliato è -2 dBTP", "[compare]")
+{
+    ma::ProfileLibrary lib;
+    const auto& spotify = *lib.findById ("spotify");
+
+    const auto loud = ma::compare (fakeMaster (-9.0f, -1.5f), spotify);
+    const auto* tp = findKey (loud, ma::highlight::truePeak);
+    REQUIRE (tp != nullptr);
+    INFO (tp->message.toStdString());
+    CHECK (tp->severity == ma::Severity::warning);
+    CHECK (tp->message.contains ("-2.0 dBTP"));
+
+    const auto quiet = ma::compare (fakeMaster (-14.5f, -1.5f), spotify);
+    REQUIRE (findKey (quiet, ma::highlight::truePeak) != nullptr);
+    CHECK (findKey (quiet, ma::highlight::truePeak)->severity < ma::Severity::warning);
+}
+
+TEST_CASE ("LRA ampio: da verificare, mai critico (dipende dall'arrangiamento)", "[compare]")
+{
+    ma::ProfileLibrary lib;
+    auto s = fakeMaster (-8.5f, -1.0f);
+    s.loudnessRange = 20.0f;
+    const auto r = ma::compare (s, *lib.findById ("rock"));
+    const auto* lra = findKey (r, ma::highlight::lra);
+    REQUIRE (lra != nullptr);
+    CHECK (lra->severity == ma::Severity::warning);
+}
+
+TEST_CASE ("Bilanciamento L/R: qualche decimo è normale, oltre 1 dB da verificare, oltre 2 dB critico", "[compare]")
+{
+    ma::ProfileLibrary lib;
+    const auto& rock = *lib.findById ("rock");
+    auto severityAt = [&] (float balance)
+    {
+        auto s = fakeMaster (-8.5f, -1.0f);
+        s.balanceDb = balance;
+        const auto* f = findKey (ma::compare (s, rock), ma::highlight::balance);
+        return f != nullptr ? f->severity : ma::Severity::ok;
+    };
+    CHECK (severityAt (0.8f) == ma::Severity::ok);
+    CHECK (severityAt (-1.5f) == ma::Severity::warning);
+    CHECK (severityAt (2.5f) == ma::Severity::critical);
+}
+
+TEST_CASE ("Mosse EQ: una mossa non è mai attribuita a una banda che sposterebbe ancora più lontano", "[compare][eq]")
+{
+    ma::ProfileLibrary lib;
+    const auto& rock = *lib.findById ("rock");
+    auto s = fakeMaster (-8.5f, -1.0f);
+    s.thirdOctaveDb = *rock.tonalCurve;
+    for (int i = 0; i <= 5; ++i) s.thirdOctaveDb[(size_t) i] -= 25.0f;   // sub quasi assente (fino a 63 Hz)
+    for (int i = 7; i <= 10; ++i) s.thirdOctaveDb[(size_t) i] += 3.0f;   // bassi sopra il target
+
+    for (auto p : { ma::WorkPhase::mix, ma::WorkPhase::master })
+    {
+        ma::CompareOptions options;
+        options.phase = p;
+        const auto r = ma::compare (s, rock, options);
+        for (const auto& m : r.eqMoves)
+        {
+            REQUIRE_FALSE (m.bands.empty());
+            for (int b : m.bands)
+            {
+                INFO (m.describe (m.gainDb).toStdString() << " banda " << b << " scostamento " << r.bandTonalDelta[(size_t) b]);
+                CHECK (r.bandTonalDelta[(size_t) b] * m.gainDb < 0.0f);
+            }
+        }
+    }
 }

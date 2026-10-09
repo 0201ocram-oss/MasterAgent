@@ -234,14 +234,16 @@ std::vector<EqMove> suggestEqMoves (const std::array<float, kNumThirdOctaves>& t
         moves.push_back (std::move (move));
     }
 
-    // due mosse dello stesso tipo e segno entro 1/3 d'ottava (due passi della griglia) sono una sola regolazione
+    // due mosse dello stesso tipo e segno entro 1/3 d'ottava (due passi della griglia) sono una sola regolazione;
+    // due shelf, che agiscono su tutto ciò che sta oltre la frequenza, anche entro un'ottava
     for (size_t i = 0; i < moves.size(); ++i)
     {
         for (size_t j = i + 1; j < moves.size();)
         {
             auto& a = moves[i];
             const auto& b = moves[j];
-            if (a.type == b.type && a.gainDb * b.gainDb > 0.0f && std::abs (std::log2 (a.frequency / b.frequency)) <= 0.34)
+            const float distance = std::abs (std::log2 (a.frequency / b.frequency));
+            if (a.type == b.type && a.gainDb * b.gainDb > 0.0f && (distance <= 0.34f || (a.type != EqMove::Type::bell && distance <= 1.0f)))
             {
                 const float wa = std::abs (a.gainDb), wb = std::abs (b.gainDb);
                 a.frequency = std::pow (2.0f, (wa * std::log2 (a.frequency) + wb * std::log2 (b.frequency)) / (wa + wb));

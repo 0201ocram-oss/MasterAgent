@@ -396,3 +396,38 @@ TEST_CASE ("Profilo da più reference: tolleranze dalla dispersione reale", "[pr
             CHECK (r.bandTonalDelta[(size_t) b] <= 2.0f * r.bandTolerance[(size_t) b]);
     }
 }
+
+TEST_CASE ("Dove: una dissolvenza con solo il fruscio dei piatti non è la sezione dell'eccesso", "[dynamics]")
+{
+    // 52 s di musica, poi 8 s in cui resta solo un fruscio acuto molto basso (la coda di una dissolvenza)
+    auto signal = test::pinkNoise (60.0, 0.4f, 11);
+    const int fadeStart = (int) (52.0 * test::kSampleRate);
+    for (int ch = 0; ch < signal.getNumChannels(); ++ch)
+        signal.clear (ch, fadeStart, signal.getNumSamples() - fadeStart);
+    addGated (signal, bandNoise (60.0, 9000.0f, 1.0f, 0.02f, 12), [] (double t) { return t >= 52.0 ? 1.0f : 0.0f; });
+
+    const auto s = test::analyse (signal);
+    for (int b = 5; b < ma::kNumBands; ++b)
+    {
+        INFO ("banda " << b << ": " << s.bandDynamics[(size_t) b].worstStartSec << " - " << s.bandDynamics[(size_t) b].worstEndSec << " s");
+        CHECK (s.bandDynamics[(size_t) b].worstStartSec < 50.0f);
+    }
+}
+
+TEST_CASE ("Dove: una sezione breve che non spiega l'eccesso non viene indicata come causa", "[dynamics]")
+{
+    // la banda è più alta del target su tutto il brano; in più 3 s ancora più carichi
+    auto signal = test::pinkNoise (120.0, 0.4f, 13);
+    addGated (signal, bandNoise (120.0, 320.0f, 2.0f, 0.6f, 14), [] (double) { return 1.0f; });
+    addGated (signal, bandNoise (120.0, 320.0f, 2.0f, 1.5f, 15), [] (double t) { return t >= 60.0 && t < 63.0 ? 1.0f : 0.0f; });
+
+    const auto s = test::analyse (signal);
+    const auto profile = ma::TargetProfile::fromSnapshot (test::analyse (test::pinkNoise (120.0, 0.4f, 13)), "Base");
+    const auto r = ma::compare (s, profile, phase (ma::WorkPhase::master));
+    const auto* lowMid = findKey (r, ma::highlight::band (2));
+    REQUIRE (lowMid != nullptr);
+    INFO (lowMid->value.toStdString() << " | " << lowMid->action.toStdString());
+    INFO ("finestra " << s.bandDynamics[2].worstStartSec << " - " << s.bandDynamics[2].worstEndSec << " s, +" << s.bandDynamics[2].worstExcessDb << " dB");
+    CHECK (lowMid->severity >= ma::Severity::warning);
+    CHECK_FALSE (lowMid->action.contains ("concentrato tra"));
+}

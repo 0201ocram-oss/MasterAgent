@@ -454,12 +454,31 @@ void SpectrumAnalyzer::fillBandDynamics (AnalysisSnapshot& s) const
     // dove: la finestra di qualche secondo in cui la banda è più sopra la sua mediana sul brano
     const int numSeconds = (int) timeline.size();
     std::vector<int> validSeconds;
+    std::vector<double> levels;
     for (int i = 0; i < numSeconds; ++i)
         if (timeline[(size_t) i].frames > 0 && timeline[(size_t) i].totalP / timeline[(size_t) i].frames > 1e-7)
+        {
             validSeconds.push_back (i);
+            levels.push_back (10.0 * std::log10 (timeline[(size_t) i].totalP / timeline[(size_t) i].frames));
+        }
 
     if (validSeconds.size() < 8)
         return;
+
+    // Solo le parti suonate a pieno: in una dissolvenza o in un intro quasi vuoto (solo hi-hat) la banda sembra
+    // in eccesso perché manca il resto, ma non è lì che il mix va corretto.
+    {
+        auto sortedLevels = levels;
+        std::nth_element (sortedLevels.begin(), sortedLevels.begin() + (long) (sortedLevels.size() / 2), sortedLevels.end());
+        const double floorDb = sortedLevels[sortedLevels.size() / 2] - 8.0;
+        std::vector<int> loudEnough;
+        for (size_t k = 0; k < validSeconds.size(); ++k)
+            if (levels[k] >= floorDb)
+                loudEnough.push_back (validSeconds[k]);
+        if (loudEnough.size() < 8)
+            return;
+        validSeconds = std::move (loudEnough);
+    }
 
     std::vector<double> excess ((size_t) numSeconds);
     std::vector<double> sorted;

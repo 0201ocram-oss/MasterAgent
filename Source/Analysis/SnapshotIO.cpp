@@ -6,7 +6,7 @@ namespace ma
 namespace
 {
     constexpr int kMagic = 0x4e53414d;   // "MASN"
-    constexpr int kFormatVersion = 1;
+    constexpr int kFormatVersion = 2;
 
     /**
         Un solo elenco di campi per scrittura e lettura, così l'ordine non può divergere.
@@ -38,6 +38,9 @@ namespace
         io (s.overs1dB);
         io (s.overs0dB);
         io (s.clipEvents);
+        io (s.clipEventsFullScale);
+        io (s.longCeilingClips);
+        io (s.ceilingClipDb);
 
         io (s.crestDb);
         io (s.plr);

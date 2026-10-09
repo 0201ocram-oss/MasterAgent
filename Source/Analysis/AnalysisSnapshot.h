@@ -125,7 +125,10 @@ struct AnalysisSnapshot
     float recentTruePeakDb = kSilenceDb;        // max sugli ultimi 3 s
     int overs1dB = 0;                           // eventi sopra -1 dBTP
     int overs0dB = 0;                           // eventi sopra 0 dBTP
-    int clipEvents = 0;                         // >= 3 campioni consecutivi a fondo scala
+    int clipEvents = 0;                         // plateau di >= 3 campioni identici ad alto livello (tosature)
+    int clipEventsFullScale = 0;                // di cui a fondo scala (>= -0.05 dBFS): sovraccarico
+    int longCeilingClips = 0;                   // plateau sotto il fondo scala lunghi almeno 0.18 ms: clipper che tosa molto
+    float ceilingClipDb = kSilenceDb;           // livello del plateau più alto sotto il fondo scala (ceiling del clipper)
 
     // --- Dinamica -------------------------------------------------------------
     float crestDb = 0.0f;                       // sample peak - RMS

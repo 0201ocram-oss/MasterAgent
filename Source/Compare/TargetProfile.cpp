@@ -139,6 +139,11 @@ std::optional<TargetProfile> TargetProfile::fromJson (const juce::String& json)
     }
     p.bandWidthTolerance = (float) root.getProperty ("bandWidthTolerance", 10.0);
 
+    if (root.hasProperty ("normalizationLufs"))
+        p.normalizationLufs = (float) root.getProperty ("normalizationLufs", -14.0);
+    if (root.hasProperty ("loudTruePeakMax"))
+        p.loudTruePeakMax = (float) root.getProperty ("loudTruePeakMax", -2.0);
+
     p.tonalCurveLoudest = readArray<kNumThirdOctaves> (root, "tonalCurveLoudest");
     p.bandTolerance = readArray<kNumBands> (root, "bandTolerance");
     p.bandWidthTolerances = readArray<kNumBands> (root, "bandWidthTolerances");
@@ -186,6 +191,10 @@ juce::String TargetProfile::toJson() const
         root->setProperty ("bandWidthPercent", arr);
     }
     root->setProperty ("bandWidthTolerance", bandWidthTolerance);
+    if (normalizationLufs)
+        root->setProperty ("normalizationLufs", round2 (*normalizationLufs));
+    if (loudTruePeakMax)
+        root->setProperty ("loudTruePeakMax", round2 (*loudTruePeakMax));
 
     writeArray (*root, "tonalCurveLoudest", tonalCurveLoudest);
     writeArray (*root, "bandTolerance", bandTolerance);
