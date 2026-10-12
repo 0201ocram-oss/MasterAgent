@@ -491,10 +491,24 @@ void MasterAgentEditor::setFullScreen (bool on)
 //==============================================================================
 void MasterAgentEditor::refreshTargets()
 {
-    std::vector<std::pair<juce::String, juce::String>> items;
-    items.emplace_back (MasterAgentProcessor::referenceTargetId, "Brano di riferimento (reference)");
+    auto groupOf = [] (const TargetProfile& p)
+    {
+        if (p.id.startsWith ("user_"))
+            return "Profili utente"_t;
+        switch (p.context)
+        {
+            case ProfileContext::streaming: return "Piattaforme streaming"_t;
+            case ProfileContext::broadcast:
+            case ProfileContext::podcast:   return "Broadcast e podcast"_t;
+            case ProfileContext::music:     break;
+        }
+        return "Generi musicali"_t;
+    };
+
+    std::vector<HeaderBar::TargetItem> items;
+    items.push_back ({ MasterAgentProcessor::referenceTargetId, "Brano di riferimento (reference)", {} });
     for (const auto& p : processor.getProfiles().getProfiles())
-        items.emplace_back (p.id, p.name);
+        items.push_back ({ p.id, p.name, groupOf (p) });
 
     header.setTargets (items, processor.getSelectedTargetId());
 }
@@ -862,12 +876,27 @@ void MasterAgentEditor::startAlbumCheck (const juce::Array<juce::File>& files)
     showScreen (Screen::album);
 }
 
+namespace
+{
+    /** Immagine in PNG, per incorporarla nei report HTML. */
+    juce::MemoryBlock encodePng (const juce::Image& image)
+    {
+        juce::MemoryOutputStream out;
+        juce::PNGImageFormat format;
+        if (image.isNull() || ! format.writeImageToStream (image, out))
+            return {};
+        return out.getMemoryBlock();
+    }
+}
+
 void MasterAgentEditor::exportAlbum()
 {
+    enum { textReport = 1, csv, png, html };
     juce::PopupMenu menu;
-    menu.addItem (1, "Report testuale (.txt)"_t);
-    menu.addItem (2, "Tabella per foglio di calcolo (.csv)"_t);
-    menu.addItem (3, "Immagine del pannello (.png)"_t);
+    menu.addItem (html, "Report HTML (.html), stampabile in PDF"_t);
+    menu.addItem (textReport, "Report testuale (.txt)"_t);
+    menu.addItem (csv, "Tabella per foglio di calcolo (.csv)"_t);
+    menu.addItem (png, "Immagine del pannello (.png)"_t);
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (albumView), [this] (int choice)
     {
@@ -879,23 +908,35 @@ void MasterAgentEditor::exportAlbum()
         if (! result.isValid())
             return;
 
-        const juce::String ext = choice == 1 ? ".txt" : (choice == 2 ? ".csv" : ".png");
-        const auto text = choice == 1 ? buildAlbumTextReport (result) : (choice == 2 ? buildAlbumCsv (result) : juce::String());
-        const auto image = choice == 3 ? albumView.createComponentSnapshot (albumView.getLocalBounds(), true, 1.0f) : juce::Image();
+        const auto panelImage = choice == png || choice == html ? albumView.createComponentSnapshot (albumView.getLocalBounds(), true, 1.0f)
+                                                                : juce::Image();
+        const juce::String ext = choice == textReport ? ".txt" : (choice == csv ? ".csv" : (choice == png ? ".png" : ".html"));
+        const auto text = choice == textReport ? buildAlbumTextReport (result)
+                        : choice == csv ? buildAlbumCsv (result)
+                        : choice == html ? buildAlbumHtmlReport (result, JucePlugin_VersionString, encodePng (panelImage))
+                        : juce::String();
+        const auto image = choice == png ? panelImage : juce::Image();
+        const bool openAfter = choice == html;
         const auto folder = album.files.isEmpty() ? juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
                                                   : album.files.getFirst().getParentDirectory();
         const auto defaultFile = folder.getChildFile ("MasterAgent_album_" + juce::Time::getCurrentTime().formatted ("%Y%m%d_%H%M%S") + ext);
 
         fileChooser = std::make_unique<juce::FileChooser> ("Esporta coerenza album"_t, defaultFile, "*" + ext);
         fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                                  [text, image] (const juce::FileChooser& fc)
+                                  [text, image, openAfter] (const juce::FileChooser& fc)
         {
             auto file = fc.getResult();
             if (file == juce::File())
                 return;
 
             bool ok = false;
-            if (image.isNull())
+            if (openAfter)
+            {
+                ok = file.replaceWithText (text, false, false, "\n");
+                if (ok)
+                    file.startAsProcess();   // si apre nel browser predefinito
+            }
+            else if (image.isNull())
             {
                 ok = file.replaceWithText (text, false, false, "\r\n");
             }
@@ -1303,45 +1344,71 @@ void MasterAgentEditor::askProfileName (std::vector<AnalysisSnapshot> snapshots,
 
 void MasterAgentEditor::exportReport()
 {
+    enum { text = 1, json, png, html };
     juce::PopupMenu menu;
-    menu.addItem (1, "Report testuale (.txt)");
-    menu.addItem (2, "Dati completi (.json)");
-    menu.addItem (3, "Screenshot dashboard (.png)");
+    menu.addItem (html, "Report HTML (.html), stampabile in PDF"_t);
+    menu.addItem (text, "Report testuale (.txt)");
+    menu.addItem (json, "Dati completi (.json)");
+    menu.addItem (png, "Screenshot dashboard (.png)");
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (header), [this] (int choice)
     {
         if (choice == 0)
             return;
 
-        const juce::String ext = choice == 1 ? ".txt" : (choice == 2 ? ".json" : ".png");
-        const auto defaultFile = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                                     .getChildFile ("MasterAgent_" + juce::Time::getCurrentTime().formatted ("%Y%m%d_%H%M%S") + ext);
+        const juce::String ext = choice == text ? ".txt" : (choice == json ? ".json" : (choice == png ? ".png" : ".html"));
+        // brano da file: il report nasce accanto al file, con il suo nome
+        const auto masterFile = processor.getMasterFile();
+        const bool fromFile = data.masterFromFile && masterFile.existsAsFile();
+        const auto baseName = fromFile ? masterFile.getFileNameWithoutExtension() + "_" : juce::String();
+        const auto folder = fromFile ? masterFile.getParentDirectory() : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+        const auto defaultFile = folder.getChildFile ("MasterAgent_" + baseName + juce::Time::getCurrentTime().formatted ("%Y%m%d_%H%M%S") + ext);
 
         // cattura i dati ora, così il file corrisponde a ciò che si vede
-        const auto snapshotCopy = data.master;
-        const auto comparisonCopy = data.comparison;
-        const auto targetName = data.targetName;
-        const auto image = choice == 3 ? content.createComponentSnapshot (content.getLocalBounds(), true, 1.0f) : juce::Image();
+        auto report = std::make_shared<ReportContext>();
+        report->snapshot = data.master;
+        report->comparison = data.comparison;
+        report->targetName = data.targetName;
+        if (data.profile != nullptr)
+        {
+            report->targetDescription = data.profile->description;
+            report->profileContext = data.profile->context;
+        }
+        report->source = data.masterFromFile ? data.masterFileName : "Audio dalla DAW"_t;
+        report->pluginVersion = JucePlugin_VersionString;
+        report->hasVersion = data.hasVersion;
+        report->versionName = data.versionName;
+        report->versionComparison = data.versionComparison;
+
+        const auto image = choice == png || choice == html ? content.createComponentSnapshot (content.getLocalBounds(), true, 1.0f) : juce::Image();
+        if (choice == html)
+            report->screenshotPng = encodePng (image);
 
         fileChooser = std::make_unique<juce::FileChooser> ("Esporta report", defaultFile, "*" + ext);
         fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                                  [choice, snapshotCopy, comparisonCopy, targetName, image] (const juce::FileChooser& fc)
+                                  [choice, report, image] (const juce::FileChooser& fc)
         {
             auto file = fc.getResult();
             if (file == juce::File())
                 return;
 
             bool ok = false;
-            if (choice == 1)
-                ok = file.replaceWithText (buildTextReport (snapshotCopy, comparisonCopy, targetName));
-            else if (choice == 2)
-                ok = file.replaceWithText (buildJsonReport (snapshotCopy, comparisonCopy, targetName));
+            if (choice == text)
+                ok = file.replaceWithText (buildTextReport (report->snapshot, report->comparison, report->targetName));
+            else if (choice == json)
+                ok = file.replaceWithText (buildJsonReport (report->snapshot, report->comparison, report->targetName));
+            else if (choice == html)
+            {
+                ok = file.replaceWithText (buildHtmlReport (*report), false, false, "\n");
+                if (ok)
+                    file.startAsProcess();   // si apre nel browser predefinito, da cui si stampa in PDF
+            }
             else
             {
                 file.deleteFile();
                 juce::FileOutputStream out (file);
-                juce::PNGImageFormat png;
-                ok = out.openedOk() && png.writeImageToStream (image, out);
+                juce::PNGImageFormat format;
+                ok = out.openedOk() && format.writeImageToStream (image, out);
             }
 
             if (! ok)

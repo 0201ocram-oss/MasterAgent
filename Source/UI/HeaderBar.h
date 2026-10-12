@@ -35,8 +35,15 @@ public:
     void resized() override;
     void lookAndFeelChanged() override;
 
+    /** Voce del selettore: le voci consecutive con lo stesso gruppo stanno sotto un'intestazione. */
+    struct TargetItem
+    {
+        juce::String id, name;
+        juce::String group;   // vuoto = nessuna intestazione
+    };
+
     /** Popola il selettore (id dei profili + voce reference). */
-    void setTargets (const std::vector<std::pair<juce::String, juce::String>>& idAndName, const juce::String& selectedId);
+    void setTargets (const std::vector<TargetItem>& items, const juce::String& selectedId);
     juce::String getSelectedTargetId() const;
 
     void setReferenceStatus (const juce::String& text, juce::Colour colour, bool referenceReady, bool hasReference);

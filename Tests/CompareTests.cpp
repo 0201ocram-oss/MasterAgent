@@ -11,17 +11,41 @@ using Catch::Approx;
 TEST_CASE ("Tutti i profili inclusi vengono caricati", "[profiles]")
 {
     ma::ProfileLibrary lib;
-    int builtIn = 0;
+    int builtIn = 0, delivery = 0;
     for (const auto& p : lib.getProfiles())
     {
         if (p.id.startsWith ("user_"))
             continue;
         ++builtIn;
-        CHECK (p.tonalCurve.has_value());
+        INFO (p.id.toStdString());
+        // broadcast e podcast sono specifiche di consegna: loudness e true peak, senza curva tonale
+        CHECK (p.tonalCurve.has_value() != p.isDeliveryStandard());
         CHECK (p.getMetric (ma::metric::integratedLufs) != nullptr);
+        CHECK (p.getMetric (ma::metric::truePeakMax) != nullptr);
+        delivery += p.isDeliveryStandard() ? 1 : 0;
     }
-    CHECK (builtIn == 9);
+    CHECK (builtIn == 12);
+    CHECK (delivery == 3);
     CHECK (lib.findById ("spotify") != nullptr);
+    CHECK (lib.findById ("spotify")->context == ma::ProfileContext::streaming);
+    CHECK (lib.findById ("rock")->context == ma::ProfileContext::music);
+    CHECK (lib.findById ("ebu_r128")->context == ma::ProfileContext::broadcast);
+    CHECK (lib.findById ("atsc_a85")->context == ma::ProfileContext::broadcast);
+    CHECK (lib.findById ("podcast")->context == ma::ProfileContext::podcast);
+}
+
+TEST_CASE ("Contesto del profilo: lettura, default e round-trip JSON", "[profiles]")
+{
+    const auto parse = [] (const char* json) { return ma::TargetProfile::fromJson (juce::String::fromUTF8 (json)); };
+
+    // profili utente salvati prima del campo: streaming se normalizzano, altrimenti musica
+    CHECK (parse (R"({"id":"a","name":"A","normalizationLufs":-14})")->context == ma::ProfileContext::streaming);
+    CHECK (parse (R"({"id":"b","name":"B"})")->context == ma::ProfileContext::music);
+
+    const auto podcast = parse (R"({"id":"c","name":"C","context":"podcast"})");
+    REQUIRE (podcast.has_value());
+    CHECK (podcast->isDeliveryStandard());
+    CHECK (ma::TargetProfile::fromJson (podcast->toJson())->context == ma::ProfileContext::podcast);
 }
 
 TEST_CASE ("Profilo da snapshot: round-trip JSON", "[profiles]")
@@ -313,4 +337,120 @@ TEST_CASE ("Mosse EQ: una mossa non è mai attribuita a una banda che sposterebb
             }
         }
     }
+}
+
+TEST_CASE ("EBU R128: -23 LUFS passa, -21 è critico, true peak -0.5 è critico", "[compare][broadcast]")
+{
+    ma::ProfileLibrary lib;
+    const auto& ebu = *lib.findById ("ebu_r128");
+
+    // in regola: nessun problema di loudness, nessun confronto tonale, nessun avviso per la codifica lossy
+    const auto ok = ma::compare (fakeMaster (-23.0f, -3.0f), ebu);
+    REQUIRE (findKey (ok, ma::highlight::integrated) != nullptr);
+    CHECK (findKey (ok, ma::highlight::integrated)->severity == ma::Severity::ok);
+    CHECK (findKey (ok, ma::highlight::truePeak)->severity == ma::Severity::ok);
+    CHECK_FALSE (ok.hasTonalTarget);
+    CHECK (ok.eqMoves.empty());
+    CHECK (ok.areas[(size_t) ma::Area::loudness].score == 100);
+
+    // troppo forte: si abbassa con un guadagno, il QC lo rifiuterebbe
+    const auto loud = ma::compare (fakeMaster (-21.0f, -3.0f), ebu);
+    const auto* integrated = findKey (loud, ma::highlight::integrated);
+    REQUIRE (integrated != nullptr);
+    CHECK (integrated->severity == ma::Severity::critical);
+    CHECK (integrated->message.contains ("QC"));
+    CHECK (integrated->action.contains ("Abbassa il guadagno di circa 2.0 dB"));
+
+    // true peak oltre -1 dBTP: critico, con il target scritto come limite
+    const auto peaky = ma::compare (fakeMaster (-23.0f, -0.5f), ebu);
+    const auto* tp = findKey (peaky, ma::highlight::truePeak);
+    REQUIRE (tp != nullptr);
+    CHECK (tp->severity == ma::Severity::critical);
+    CHECK (tp->target == "<= -1.0 dBTP");
+    CHECK (tp->action.contains ("ceiling a -1.0 dBTP"));
+
+    // molto sotto il massimo: in regola, non "headroom inutilizzato"
+    const auto quietPeaks = ma::compare (fakeMaster (-23.0f, -12.0f), ebu);
+    CHECK (findKey (quietPeaks, ma::highlight::truePeak)->severity == ma::Severity::ok);
+}
+
+TEST_CASE ("Broadcast troppo basso: guadagno, e limiter true peak solo se i picchi superano il massimo", "[compare][broadcast]")
+{
+    ma::ProfileLibrary lib;
+    const auto& ebu = *lib.findById ("ebu_r128");
+
+    // +3 dB portano il true peak da -6 a -3 dBTP: basta il guadagno
+    const auto room = ma::compare (fakeMaster (-26.0f, -6.0f), ebu);
+    const auto* a = findKey (room, ma::highlight::integrated);
+    REQUIRE (a != nullptr);
+    CHECK (a->severity == ma::Severity::critical);
+    CHECK (a->action.contains ("Alza il guadagno di circa 3.0 dB"));
+    CHECK (a->action.contains ("entro il limite"));
+
+    // +3 dB porterebbero il true peak a +1 dBTP: serve un limiter che lavori circa 2 dB
+    const auto noRoom = ma::compare (fakeMaster (-26.0f, -2.0f), ebu);
+    const auto* b = findKey (noRoom, ma::highlight::integrated);
+    REQUIRE (b != nullptr);
+    CHECK (b->action.contains ("limiter true peak"));
+    CHECK (b->action.contains ("circa 2.0 dB sui picchi"));
+}
+
+TEST_CASE ("ATSC A/85 e podcast: tolleranze dei rispettivi standard", "[compare][broadcast]")
+{
+    ma::ProfileLibrary lib;
+    const auto& atsc = *lib.findById ("atsc_a85");
+    const auto& podcast = *lib.findById ("podcast");
+
+    auto integratedSeverity = [] (const ma::TargetProfile& p, float lufs, float tp)
+    {
+        return findKey (ma::compare (fakeMaster (lufs, tp), p), ma::highlight::integrated)->severity;
+    };
+
+    CHECK (integratedSeverity (atsc, -24.0f, -6.0f) == ma::Severity::ok);
+    CHECK (integratedSeverity (atsc, -22.5f, -6.0f) == ma::Severity::ok);        // ±2 dB
+    CHECK (integratedSeverity (atsc, -21.0f, -6.0f) == ma::Severity::critical);
+    CHECK (findKey (ma::compare (fakeMaster (-24.0f, -1.5f), atsc), ma::highlight::truePeak)->severity
+           == ma::Severity::critical);                                          // massimo -2 dBTP
+
+    CHECK (integratedSeverity (podcast, -16.0f, -2.0f) == ma::Severity::ok);
+    CHECK (integratedSeverity (podcast, -18.5f, -4.0f) == ma::Severity::critical);
+    const auto loud = ma::compare (fakeMaster (-14.5f, -2.0f), podcast);
+    CHECK (findKey (loud, ma::highlight::integrated)->severity == ma::Severity::warning);
+    CHECK (findKey (loud, ma::highlight::integrated)->message.contains ("podcast"));
+
+    // in fase di mix loudness e picchi del master non si giudicano, neanche per il broadcast
+    ma::CompareOptions mix;
+    mix.phase = ma::WorkPhase::mix;
+    const auto r = ma::compare (fakeMaster (-30.0f, -8.0f), atsc, mix);
+    CHECK (findKey (r, ma::highlight::integrated)->severity == ma::Severity::info);
+}
+
+TEST_CASE ("Broadcast troppo forte con picchi oltre il massimo: un solo guadagno risolve tutto, niente limiter", "[compare][broadcast]")
+{
+    ma::ProfileLibrary lib;
+    const auto& ebu = *lib.findById ("ebu_r128");
+
+    // master musicale consegnato così com'è: -16.4 LUFS, true peak +0.4 dBTP con picchi inter-campione
+    auto s = fakeMaster (-16.4f, 0.4f);
+    s.overs0dB = 21;
+    const auto r = ma::compare (s, ebu);
+
+    const auto* tp = findKey (r, ma::highlight::truePeak);
+    const auto* overs = findKey (r, ma::highlight::overs);
+    REQUIRE (tp != nullptr);
+    REQUIRE (overs != nullptr);
+    CHECK (tp->severity == ma::Severity::critical);
+    CHECK (tp->action.contains ("stesso guadagno"));
+    CHECK (tp->action.contains ("-6.2 dBTP"));       // 0.4 - 6.6
+    CHECK (overs->action.contains ("stesso guadagno"));
+    CHECK_FALSE (overs->message.contains ("limiter"));
+
+    // tra le priorità una sola voce: abbassare il guadagno
+    REQUIRE (r.priorities.size() == 1);
+    CHECK (r.priorities.front().key == ma::highlight::integrated);
+    CHECK (r.priorities.front().action.contains ("Abbassa il guadagno di circa 6.6 dB"));
+
+    // se abbassando i picchi restano oltre il massimo, il limiter resta necessario
+    const auto hot = ma::compare (fakeMaster (-22.0f, 1.0f), ebu);
+    CHECK (findKey (hot, ma::highlight::truePeak)->action.contains ("Limiter true peak"));
 }

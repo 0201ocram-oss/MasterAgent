@@ -210,11 +210,14 @@ void StreamingPanel::paintContent (juce::Graphics& g, juce::Rectangle<float> are
         g.drawText (juce::String (r.playbackTruePeak, 1) + " dBTP", cell (4), juce::Justification::centredRight);
     }
 
+    // con uno standard di consegna (broadcast, podcast) conta il target, non le piattaforme
+    const bool deliveryTarget = data->profile != nullptr && data->profile->isDeliveryStandard();
     g.setFont (fonts::label (10.5f));
-    g.setColour (data->phase == WorkPhase::mix ? colours::warning : colours::textFaint);
-    g.drawFittedText (data->phase == WorkPhase::mix
-                          ? "Fase di mix: anteprima solo indicativa, la loudness finale la decide il mastering."_u
-                          : "Guadagno negativo = la piattaforma abbasserà il brano: il loudness oltre il target non dà vantaggi e costa dinamica."_u,
+    g.setColour (data->phase == WorkPhase::mix || deliveryTarget ? colours::warning : colours::textFaint);
+    g.drawFittedText (deliveryTarget ? "Il target è uno standard di consegna (broadcast o podcast): l'anteprima streaming è solo indicativa."_t
+                      : data->phase == WorkPhase::mix
+                          ? "Fase di mix: anteprima solo indicativa, la loudness finale la decide il mastering."_t
+                          : "Guadagno negativo = la piattaforma abbasserà il brano: il loudness oltre il target non dà vantaggi e costa dinamica."_t,
                       area.toNearestInt(), juce::Justification::bottomLeft, 2);
 }
 

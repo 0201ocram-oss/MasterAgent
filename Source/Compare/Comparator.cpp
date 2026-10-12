@@ -298,6 +298,56 @@ namespace
         return texts;
     }
 
+    /**
+        Broadcast e podcast: loudness e true peak sono specifiche di consegna. Fuori tolleranza il broadcaster
+        rifiuta il file o lo corregge d'ufficio; la loudness si sistema con un guadagno, e il limiter serve solo
+        se alzando i picchi superano il massimo.
+    */
+    struct Advice
+    {
+        juce::String message, action;
+    };
+
+    Advice deliveryAdvice (const juce::String& key, float value, const MetricRange& range, float truePeak,
+                           float truePeakLimit, const TargetProfile& profile)
+    {
+        const bool broadcast = profile.context == ProfileContext::broadcast;
+        if (key == metric::truePeakMax)
+            return { (broadcast ? "True peak oltre il massimo dello standard %1 (%2 dBTP): il file non passa il controllo tecnico (QC) del broadcaster."_t
+                                : "True peak oltre il massimo consigliato per i podcast (%2 dBTP): la codifica MP3/AAC delle app può distorcere."_t)
+                         .replace ("%1", profile.name).replace ("%2", fmt (range.max, 1)),
+                     "Limiter true peak (con oversampling) come ultimo elemento della catena, ceiling a %1 dBTP."_t.replace ("%1", fmt (range.max, 1)) };
+
+        const float gain = range.target - value;
+        const auto gainText = fmt (std::abs (gain), 1);
+        const auto targetText = fmt (range.target, 1);
+        if (gain < 0.0f)
+            return { (broadcast ? "Più forte dello standard %1: il file non passa il controllo tecnico (QC) del broadcaster, che lo rifiuta o lo abbassa d'ufficio."_t
+                                : "Più forte dello standard podcast: non tutte le app normalizzano, e tra un episodio e l'altro chi ascolta deve correggere il volume."_t)
+                         .replace ("%1", profile.name),
+                     "Abbassa il guadagno di circa %1 dB (normalizzazione a %2 LUFS): basta un guadagno, il limiter non serve."_t
+                         .replace ("%1", gainText).replace ("%2", targetText) };
+
+        Advice advice;
+        advice.message = (broadcast ? "Più basso dello standard %1: il file non passa il controllo tecnico (QC) del broadcaster."_t
+                                    : "Più basso dello standard podcast: in auto o in cuffia, in ambienti rumorosi, la voce si perde rispetto agli altri programmi."_t)
+                             .replace ("%1", profile.name);
+        const float peakAfter = truePeak + gain;
+        if (peakAfter <= truePeakLimit)
+        {
+            advice.action = "Alza il guadagno di circa %1 dB (normalizzazione a %2 LUFS): il true peak arriverebbe a %3 dBTP, entro il limite."_t
+                                .replace ("%1", gainText).replace ("%2", targetText).replace ("%3", fmt (peakAfter, 1));
+            return advice;
+        }
+
+        const float limiting = peakAfter - truePeakLimit;
+        advice.action = "Alza il guadagno di circa %1 dB (normalizzazione a %2 LUFS) e metti dopo un limiter true peak con ceiling a %3 dBTP: lavorerà circa %4 dB sui picchi."_t
+                            .replace ("%1", gainText).replace ("%2", targetText).replace ("%3", fmt (truePeakLimit, 1)).replace ("%4", fmt (limiting, 1));
+        if (limiting > 4.0f)
+            advice.action << " " << "Più di 3-4 dB di limiting si sentono: prima comprimi o livella le parti più forti (leveler sul parlato), poi alza."_t;
+        return advice;
+    }
+
     /** Metriche che descrivono il master finito: sul mix bus vengono decise dal mastering. */
     bool isMasteringOnly (const juce::String& key)
     {
@@ -482,18 +532,39 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
         const bool turnedDown = key == metric::integratedLufs && profile.normalizationLufs.has_value() && delta > 0.0f;
         if (turnedDown)
             sev = std::min (sev, Severity::warning);
+        // broadcast e podcast: loudness e true peak sono requisiti di consegna, e sotto il massimo il true peak è in regola
+        const bool delivery = profile.isDeliveryStandard() && (key == metric::integratedLufs || key == metric::truePeakMax);
+        if (delivery && key == metric::truePeakMax && delta < 0.0f)
+        {
+            sev = Severity::ok;
+            delta = 0.0f;
+        }
 
-        juce::String message ("Nel range.");
+        juce::String message ("Nel range."), action;
         if (sev != Severity::ok)
-            message = (turnedDown ? "La piattaforma abbasserà il brano di circa " + fmt (it->second - *profile.normalizationLufs, 1, "dB")
-                                        + " (normalizzazione a " + fmt (*profile.normalizationLufs, 0, "LUFS") + "): non è un errore, "
-                                          "ma la dinamica sacrificata per il volume non ti restituisce niente. Valuta meno guadagno nel limiter."_u
-                                  : (delta > 0.0f ? text.whenHigh : text.whenLow))
+        {
+            juce::String advice;
+            if (delivery)
+            {
+                const auto* tpRange = profile.getMetric (metric::truePeakMax);
+                const auto d = deliveryAdvice (key, it->second, *range, s.truePeakMaxDb, tpRange != nullptr ? tpRange->max : -1.0f, profile);
+                advice = d.message;
+                action = d.action;
+            }
+            message = (delivery ? advice
+                                : turnedDown ? "La piattaforma abbasserà il brano di circa " + fmt (it->second - *profile.normalizationLufs, 1, "dB")
+                                                   + " (normalizzazione a " + fmt (*profile.normalizationLufs, 0, "LUFS") + "): non è un errore, "
+                                                     "ma la dinamica sacrificata per il volume non ti restituisce niente. Valuta meno guadagno nel limiter."_u
+                                             : (delta > 0.0f ? text.whenHigh : text.whenLow))
                     + "  (" + signedFmt (delta, std::max (1, text.decimals), text.unit)
                     + (delta > 0.0f ? " sopra il massimo)" : " sotto il minimo)");
+        }
 
-        list.add (text.key, text.category, text.label, fmt (it->second, text.decimals, text.unit),
-                  rangeText (*range, text.decimals, text.unit), delta, sev, message, text.stage);
+        const auto targetText = delivery && key == metric::truePeakMax ? "<= " + fmt (range->max, text.decimals, text.unit)
+                                                                       : rangeText (*range, text.decimals, text.unit);
+        auto& added = list.add (text.key, text.category, text.label, fmt (it->second, text.decimals, text.unit),
+                                targetText, delta, sev, message, text.stage);
+        added.action = action;
     }
 
     if (mix)
@@ -819,7 +890,9 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
                                 + "  (" + signedFmt (integrated->delta, 1, "LUFS") + " sotto il minimo)";
 
         // master forti con ceiling vicino a 0: la codifica lossy genera overs anche se il WAV è pulito
-        if (s.integratedLufs > -10.0f && s.truePeakMaxDb > -1.0f && s.overs0dB == 0)
+        // (con broadcast e podcast il loudness è già fuori specifica e il consiglio è un guadagno)
+        const bool delivery = profile.isDeliveryStandard();
+        if (! delivery && s.integratedLufs > -10.0f && s.truePeakMaxDb > -1.0f && s.overs0dB == 0)
         {
             auto* tp = list.find (highlight::truePeak);
             if (tp == nullptr || tp->severity < Severity::warning)
@@ -830,7 +903,7 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
         }
 
         // il sub che consuma headroom spiega spesso un loudness basso
-        if (isProblem (integrated) && integrated->delta < 0.0f && result.hasTonalTarget
+        if (! delivery && isProblem (integrated) && integrated->delta < 0.0f && result.hasTonalTarget
             && (result.bandTonalDelta[0] > result.bandTolerance[0] || s.subRumbleDb > -15.0f))
             integrated->message << " Nota: c'è più energia del target nel Sub, che probabilmente sta limitando il loudness."_u;
     }
@@ -995,6 +1068,31 @@ ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profil
     if (options.fifoOverflow)
         list.add (highlight::time, "Analisi", "Buffer di analisi", "overflow", "-", 0.0f, Severity::warning,
                   "Parte dell'audio non è stata analizzata (CPU sovraccarica). Premi Reset e riproduci di nuovo."_u, stage::analysis);
+
+    // Broadcast e podcast troppo forti: lo stesso guadagno che corregge la loudness abbassa anche i picchi,
+    // e un limiter in più sarebbe il consiglio sbagliato. Una sola azione (e una sola priorità) per tutti.
+    if (! mix && profile.isDeliveryStandard())
+    {
+        auto* integrated = list.find (highlight::integrated);
+        const auto* range = profile.getMetric (metric::integratedLufs);
+        const auto* tpRange = profile.getMetric (metric::truePeakMax);
+        if (isProblem (integrated) && integrated->delta > 0.0f && range != nullptr && tpRange != nullptr
+            && s.truePeakMaxDb - (s.integratedLufs - range->target) <= tpRange->max)
+        {
+            const float reduction = s.integratedLufs - range->target;
+            integrated->group = "gain";
+            for (auto& f : result.findings)
+            {
+                if (f.severity < Severity::warning || (f.key != highlight::truePeak && f.key != highlight::overs))
+                    continue;
+                f.group = "gain";
+                f.action = "Si risolve con lo stesso guadagno della loudness: abbassando di %1 dB il true peak scende a %2 dBTP."_t
+                               .replace ("%1", fmt (reduction, 1)).replace ("%2", fmt (s.truePeakMaxDb - reduction, 1));
+                if (f.key == highlight::overs)
+                    f.message = "Picchi inter-campione sopra 0 dBTP: al livello attuale distorcono in conversione D/A e nella codifica."_t;
+            }
+        }
+    }
 
     // diagnosi diverse che si risolvono con la stessa azione: una sola voce tra le priorità
     {

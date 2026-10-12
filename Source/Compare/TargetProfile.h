@@ -38,12 +38,23 @@ namespace metric
     inline const juce::String crestHigh        = "crestHigh";
 }
 
+/**
+    Dove andrà il master. Per musica e streaming loudness e picchi sono scelte di mastering; per broadcast e
+    podcast sono specifiche di consegna (EBU R128, ATSC A/85, AES TD1004): fuori tolleranza il file non passa
+    il controllo tecnico e si corregge con un guadagno, non con il limiter.
+*/
+enum class ProfileContext { music, streaming, broadcast, podcast };
+
 struct TargetProfile
 {
     juce::String id;
     juce::String name;
     juce::String description;
     bool isReference = false;   // generato dall'analisi di un brano
+    ProfileContext context = ProfileContext::music;   // JSON "context"; senza campo: streaming se c'è normalizationLufs
+
+    /** Broadcast o podcast: loudness e true peak sono requisiti di consegna. */
+    bool isDeliveryStandard() const noexcept { return context == ProfileContext::broadcast || context == ProfileContext::podcast; }
 
     std::map<juce::String, MetricRange> metrics;
 

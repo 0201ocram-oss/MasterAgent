@@ -288,6 +288,21 @@ int main (int argc, char* argv[])
             data.comparison = ma::compare (data.master, *data.profile);
         }
 
+        // target broadcast (EBU R128): niente curva tonale, anteprima streaming solo indicativa
+        {
+            const auto* music = data.profile;
+            data.profile = lib.findById ("ebu_r128");
+            data.targetName = data.profile->name;
+            data.comparison = ma::compare (data.master, *data.profile);
+            dash.header.setTargets ({ { "ebu_r128", data.profile->name, "Broadcast e podcast" } }, "ebu_r128");
+            render ("preview_broadcast.png");
+
+            data.profile = music;
+            data.targetName = music->name;
+            data.comparison = ma::compare (data.master, *data.profile);
+            dash.header.setTargets ({ { "pop", "Pop commerciale" } }, "pop");
+        }
+
         // coerenza album: 5 brani, uno più brillante e meno limitato, uno più forte
         {
             struct Spec { const char* name; float bass, high, drive; int seed; };

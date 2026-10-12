@@ -5,7 +5,10 @@
 //   MasterAgentAnalyze --make-profile "<nome>" <out.json> <file audio> <file audio> [...]
 //       crea un profilo da più brani di riferimento (target = media, tolleranze = dispersione tra i brani)
 //   MasterAgentAnalyze --album <file audio> <file audio> [...]
-//       coerenza album: ogni brano confrontato con la mediana dell'album (stampa il report testuale)
+//       coerenza album: ogni brano confrontato con la mediana dell'album (stampa il report testuale;
+//       con MA_HTML=<out.html> salva anche il report HTML)
+//   MasterAgentAnalyze --html <out.html> <file audio>
+//       report HTML del brano, come l'export del plugin (profilo e fase da MA_PROFILE / MA_PHASE)
 //   MasterAgentAnalyze --verify <cartella> <file audio> [...]
 //       per tools/verify_analysis.py: salva l'audio decodificato (WAV float) e misure, cronologia, segni
 //       e diagnosi (tutti i profili, fase mix e master) in JSON, da confrontare con un calcolo indipendente
@@ -16,6 +19,7 @@
 #include "Analysis/Timeline.h"
 #include "Compare/AlbumCheck.h"
 #include "Compare/Comparator.h"
+#include "Compare/ReportExporter.h"
 
 #include <cstdio>
 
@@ -113,6 +117,13 @@ namespace
         }
 
         std::printf ("\n%s", ma::buildAlbumTextReport (album).toRawUTF8());
+
+        if (const auto html = juce::SystemStats::getEnvironmentVariable ("MA_HTML", {}); html.isNotEmpty())
+        {
+            const juce::File out (html);
+            if (! out.replaceWithText (ma::buildAlbumHtmlReport (album, "CLI"), false, false, "\n"))
+                std::printf ("Impossibile scrivere %s\n", out.getFullPathName().toRawUTF8());
+        }
         return album.critical > 0 ? 2 : 0;
     }
 }
@@ -364,6 +375,36 @@ int main (int argc, char* argv[])
     ma::CompareOptions options;
     options.phase = juce::SystemStats::getEnvironmentVariable ("MA_PHASE", "master").equalsIgnoreCase ("mix") ? ma::WorkPhase::mix
                                                                                                            : ma::WorkPhase::master;
+
+    if (argc > 1 && juce::String (argv[1]) == "--html")
+    {
+        if (argc != 4)
+        {
+            std::printf ("Uso: MasterAgentAnalyze --html <out.html> <file audio>\n");
+            return 1;
+        }
+        const juce::File out (juce::String::fromUTF8 (argv[2])), file (juce::String::fromUTF8 (argv[3]));
+        ma::ReportContext report;
+        juce::String error;
+        if (! ma::analyseFile (file, report.snapshot, error))
+        {
+            std::printf ("Impossibile analizzare %s: %s\n", file.getFullPathName().toRawUTF8(), error.toRawUTF8());
+            return 1;
+        }
+        report.comparison = ma::compare (report.snapshot, *profile, options);
+        report.targetName = profile->name;
+        report.targetDescription = profile->description;
+        report.profileContext = profile->context;
+        report.source = file.getFileName();
+        report.pluginVersion = "CLI";
+        if (! out.replaceWithText (ma::buildHtmlReport (report), false, false, "\n"))
+        {
+            std::printf ("Impossibile scrivere %s\n", out.getFullPathName().toRawUTF8());
+            return 1;
+        }
+        std::printf ("%s: punteggio %d, report in %s\n", file.getFileName().toRawUTF8(), report.comparison.score, out.getFullPathName().toRawUTF8());
+        return 0;
+    }
 
     for (int a = 1; a < argc; ++a)
     {

@@ -50,7 +50,7 @@ HeaderBar::HeaderBar()
 {
     addAndMakeVisible (targetBox);
     targetBox.onChange = [this] { if (onTargetChanged) onTargetChanged (getSelectedTargetId()); };
-    targetBox.setTooltip ("Standard di confronto: profilo di mercato o brano di riferimento");
+    targetBox.setTooltip ("Standard di confronto: genere musicale, piattaforma streaming, broadcast e podcast o brano di riferimento"_t);
 
     // selettore di modalità a segmenti
     for (auto* b : { &wholeSongButton, &liveButton })
@@ -108,7 +108,7 @@ HeaderBar::HeaderBar()
     resetButton.onClick = [this] { if (onReset) onReset(); };
     resetButton.setTooltip ("Azzera l'analisi");
     exportButton.onClick = [this] { if (onExport) onExport(); };
-    exportButton.setTooltip ("Esporta il report (TXT, JSON) o uno screenshot (PNG)");
+    exportButton.setTooltip ("Esporta il report (HTML stampabile, TXT, JSON) o uno screenshot (PNG)"_t);
 
     listenButton.setClickingTogglesState (true);
     listenButton.onClick = [this] { if (onListenChanged) onListenChanged (listenButton.getToggleState()); };
@@ -226,16 +226,21 @@ void HeaderBar::resized()
     refStatus.setBounds (r);
 }
 
-void HeaderBar::setTargets (const std::vector<std::pair<juce::String, juce::String>>& idAndName, const juce::String& selectedId)
+void HeaderBar::setTargets (const std::vector<TargetItem>& items, const juce::String& selectedId)
 {
     targetBox.clear (juce::dontSendNotification);
     targetIds.clear();
 
+    // le intestazioni non contano negli indici delle voci, che restano allineati a targetIds
     int itemId = 1;
-    for (const auto& [id, name] : idAndName)
+    juce::String group;
+    for (const auto& item : items)
     {
-        targetBox.addItem (name, itemId++);
-        targetIds.add (id);
+        if (item.group != group && item.group.isNotEmpty())
+            targetBox.addSectionHeading (item.group);
+        group = item.group;
+        targetBox.addItem (item.name, itemId++);
+        targetIds.add (item.id);
     }
 
     const int index = targetIds.indexOf (selectedId);

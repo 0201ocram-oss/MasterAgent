@@ -27,6 +27,12 @@ prassi attuale, perché quei CD sono dell'epoca della loudness war.
 
 Le curve restano indicative: per un riferimento preciso usa un brano di riferimento o un profilo creato
 da uno (pulsante "Salva profilo" nel plugin).
+
+Broadcast e podcast ("context": "broadcast" / "podcast") sono specifiche di consegna, senza curva tonale:
+- EBU R128 (2020): -23 LUFS, scarto ammesso ±0.5 LU (±1 LU solo per la diretta), true peak max -1 dBTP.
+- ATSC A/85 (2013): -24 LKFS, tolleranza ±2 dB usata per il CALM Act, true peak max -2 dBTP.
+- Podcast: Apple Podcasts -16 LKFS ±1 dB, true peak max -1 dBTP; AES TD1004.1.15-10 indica -16 LUFS come massimo.
+Il margine "warn" di 0.2 dB copre le differenze tra i meter: oltre, il file non passa il QC.
 """
 import json, math, os
 
@@ -101,19 +107,19 @@ profiles = [
     ("streaming_generic", "Streaming (generico)", "Master bilanciato per tutte le piattaforme: -14 LUFS, -1 dBTP, dinamica preservata.",
      {"integratedLufs": m(-15, -12, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 9, 6, 2),
       "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5), "dr": m(7, 12, 9, 2)}, pop_curve,
-     {"normalizationLufs": -14, "bandTolerance": POP_BAND_TOLERANCE}),
+     {"context": "streaming", "normalizationLufs": -14, "bandTolerance": POP_BAND_TOLERANCE}),
     ("spotify", "Spotify", "Normalizzazione a -14 LUFS, true peak consigliato -1 dBTP (-2 se oltre -14 LUFS).",
      {"integratedLufs": m(-15, -13, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 9, 6, 2),
       "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5)}, pop_curve,
-     {"normalizationLufs": -14, "loudTruePeakMax": -2, "bandTolerance": POP_BAND_TOLERANCE}),
+     {"context": "streaming", "normalizationLufs": -14, "loudTruePeakMax": -2, "bandTolerance": POP_BAND_TOLERANCE}),
     ("apple_music", "Apple Music", "Sound Check a -16 LUFS, true peak -1 dBTP: premia i master più dinamici.",
      {"integratedLufs": m(-17, -14, -16, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 10, 7, 2),
       "plr": m(10, 15, 12, 2), "minPsr": m(8, 13, 10, 1.5)}, pop_curve,
-     {"normalizationLufs": -16, "bandTolerance": POP_BAND_TOLERANCE}),
+     {"context": "streaming", "normalizationLufs": -16, "bandTolerance": POP_BAND_TOLERANCE}),
     ("youtube", "YouTube", "Normalizza a -14 LUFS (solo in riduzione), true peak -1 dBTP.",
      {"integratedLufs": m(-15, -12, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 9, 6, 2),
       "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5)}, pop_curve,
-     {"normalizationLufs": -14, "bandTolerance": POP_BAND_TOLERANCE}),
+     {"context": "streaming", "normalizationLufs": -14, "bandTolerance": POP_BAND_TOLERANCE}),
     ("pop", "Pop commerciale", "Valori tipici delle release pop attuali (loudness da mercato, non da normalizzazione).",
      {"integratedLufs": m(-9, -6.5, -7.5, 1.5), "truePeakMax": m(-2, -0.3, -1, 0.5), "loudnessRange": m(3, 9, 5, 3),
       "plr": m(7, 10, 8.5, 1.5), "minPsr": m(6, 9, 7.5, 1.5), "dr": m(5, 9, 7, 1.5), "spectralTilt": tilt_range(pop_curve),
@@ -139,14 +145,25 @@ profiles = [
       "plr": m(7, 10, 8.5, 1.5), "minPsr": m(6, 9, 7.5, 1.5), "dr": m(5, 9, 7, 1.5), "spectralTilt": tilt_range(techno_curve),
       "correlation": m(0.35, 0.9, 0.6, 0.15), "widthPercent": m(12, 38, 24, 8), "lowEndWidthPercent": m(0, 5, 1, 5)},
      techno_curve),
+    # specifiche di consegna: solo loudness e true peak, senza curva tonale
+    ("ebu_r128", "EBU R128 (TV e radio)", "Consegna broadcast europea: -23 LUFS ±0.5 LU, true peak max -1 dBTP. Fuori tolleranza il file non passa il QC.",
+     {"integratedLufs": m(-23.5, -22.5, -23, 0.2), "truePeakMax": m(-6, -1, -1, 0.2)}, None, {"context": "broadcast"}),
+    ("atsc_a85", "ATSC A/85 (TV USA)", "Consegna broadcast USA: -24 LKFS ±2 dB, true peak max -2 dBTP. Fuori tolleranza il file non passa il QC.",
+     {"integratedLufs": m(-26, -22, -24, 0.2), "truePeakMax": m(-6, -2, -2, 0.2)}, None, {"context": "broadcast"}),
+    ("podcast", "Podcast", "-16 LUFS ±1 LU, true peak max -1 dBTP (Apple Podcasts, AES TD1004).",
+     {"integratedLufs": m(-17, -15, -16, 1), "truePeakMax": m(-6, -1, -1, 0.5)}, None, {"context": "podcast"}),
 ]
 
 outdir = os.path.join(os.path.dirname(__file__), "..", "Resources", "profiles")
 os.makedirs(outdir, exist_ok=True)
 for pid, name, desc, metrics, tonal, *extra in profiles:
-    data = {"id": pid, "name": name, "description": desc, "metrics": metrics,
-            "tonalCurve": tonal, "tonalTolerance": 2.5}
+    data = {"id": pid, "name": name, "description": desc, "metrics": metrics}
+    if tonal is not None:
+        data.update({"tonalCurve": tonal, "tonalTolerance": 2.5})
     data.update(extra[0] if extra else {})
     with open(os.path.join(outdir, pid + ".json"), "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-    print(f"{pid:18s} tilt {tilt(tonal):6.2f}  sub(31.5/40/50) {tonal[2]:6.1f} {tonal[3]:6.1f} {tonal[4]:6.1f}  63 {tonal[5]:5.1f}  125 {tonal[8]:5.1f}  1k {tonal[17]:5.1f}  10k {tonal[27]:6.1f}")
+    if tonal is None:
+        print(f"{pid:18s} {data['context']}")
+    else:
+        print(f"{pid:18s} tilt {tilt(tonal):6.2f}  sub(31.5/40/50) {tonal[2]:6.1f} {tonal[3]:6.1f} {tonal[4]:6.1f}  63 {tonal[5]:5.1f}  125 {tonal[8]:5.1f}  1k {tonal[17]:5.1f}  10k {tonal[27]:6.1f}")

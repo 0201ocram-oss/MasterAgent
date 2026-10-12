@@ -74,6 +74,7 @@
     -24.93
   ],
   "tonalTolerance": 2.5,
+  "context": "streaming",
   "normalizationLufs": -14,
   "bandTolerance": [
     6.05,

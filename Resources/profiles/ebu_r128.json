@@ -1,0 +1,20 @@
+{
+  "id": "ebu_r128",
+  "name": "EBU R128 (TV e radio)",
+  "description": "Consegna broadcast europea: -23 LUFS ±0.5 LU, true peak max -1 dBTP. Fuori tolleranza il file non passa il QC.",
+  "metrics": {
+    "integratedLufs": {
+      "min": -23.5,
+      "max": -22.5,
+      "target": -23,
+      "warn": 0.2
+    },
+    "truePeakMax": {
+      "min": -6,
+      "max": -1,
+      "target": -1,
+      "warn": 0.2
+    }
+  },
+  "context": "broadcast"
+}

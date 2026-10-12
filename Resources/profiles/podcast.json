@@ -1,0 +1,20 @@
+{
+  "id": "podcast",
+  "name": "Podcast",
+  "description": "-16 LUFS ±1 LU, true peak max -1 dBTP (Apple Podcasts, AES TD1004).",
+  "metrics": {
+    "integratedLufs": {
+      "min": -17,
+      "max": -15,
+      "target": -16,
+      "warn": 1
+    },
+    "truePeakMax": {
+      "min": -6,
+      "max": -1,
+      "target": -1,
+      "warn": 0.5
+    }
+  },
+  "context": "podcast"
+}

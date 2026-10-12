@@ -144,6 +144,13 @@ std::optional<TargetProfile> TargetProfile::fromJson (const juce::String& json)
     if (root.hasProperty ("loudTruePeakMax"))
         p.loudTruePeakMax = (float) root.getProperty ("loudTruePeakMax", -2.0);
 
+    const auto context = root.getProperty ("context", {}).toString();
+    if (context == "broadcast")      p.context = ProfileContext::broadcast;
+    else if (context == "podcast")   p.context = ProfileContext::podcast;
+    else if (context == "streaming") p.context = ProfileContext::streaming;
+    else if (context == "music")     p.context = ProfileContext::music;
+    else                             p.context = p.normalizationLufs ? ProfileContext::streaming : ProfileContext::music;
+
     p.tonalCurveLoudest = readArray<kNumThirdOctaves> (root, "tonalCurveLoudest");
     p.bandTolerance = readArray<kNumBands> (root, "bandTolerance");
     p.bandWidthTolerances = readArray<kNumBands> (root, "bandWidthTolerances");
@@ -195,6 +202,11 @@ juce::String TargetProfile::toJson() const
         root->setProperty ("normalizationLufs", round2 (*normalizationLufs));
     if (loudTruePeakMax)
         root->setProperty ("loudTruePeakMax", round2 (*loudTruePeakMax));
+    if (context != ProfileContext::music)
+    {
+        static const char* names[] = { "music", "streaming", "broadcast", "podcast" };
+        root->setProperty ("context", names[(int) context]);
+    }
 
     writeArray (*root, "tonalCurveLoudest", tonalCurveLoudest);
     writeArray (*root, "bandTolerance", bandTolerance);

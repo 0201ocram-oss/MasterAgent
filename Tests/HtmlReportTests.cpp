@@ -1,0 +1,147 @@
+#include "TestSignals.h"
+#include "Compare/AlbumCheck.h"
+#include "Compare/ReportExporter.h"
+#include "Compare/TargetProfile.h"
+
+#include <catch2/catch_test_macros.hpp>
+
+namespace
+{
+    int count (const juce::String& text, const juce::String& what)
+    {
+        int n = 0;
+        for (int i = text.indexOf (what); i >= 0; i = text.indexOf (i + what.length(), what))
+            ++n;
+        return n;
+    }
+
+    ma::ReportContext makeContext (const char* profileId, const juce::String& source)
+    {
+        static ma::ProfileLibrary lib;
+        const auto& profile = *lib.findById (profileId);
+
+        ma::ReportContext ctx;
+        ctx.snapshot = test::analyse (test::pinkNoise (20.0, 0.5f));
+        ctx.comparison = ma::compare (ctx.snapshot, profile);
+        ctx.targetName = profile.name;
+        ctx.targetDescription = profile.description;
+        ctx.profileContext = profile.context;
+        ctx.source = source;
+        ctx.pluginVersion = "1.0.0";
+        return ctx;
+    }
+}
+
+TEST_CASE ("HTML: il testo viene messo in sicurezza", "[report][html]")
+{
+    CHECK (ma::escapeHtml ("a<b & \"c\">") == "a&lt;b &amp; &quot;c&quot;&gt;");
+    CHECK (ma::escapeHtml ("&amp;") == "&amp;amp;");
+
+    // un nome di file con caratteri speciali non rompe il documento
+    const auto html = ma::buildHtmlReport (makeContext ("pop", "<mix&v3>.wav"));
+    CHECK (html.contains ("&lt;mix&amp;v3&gt;.wav"));
+    CHECK_FALSE (html.contains ("<mix&v3>"));
+}
+
+TEST_CASE ("HTML: documento completo con pagella, misure, grafico tonale e diagnosi", "[report][html]")
+{
+    const auto ctx = makeContext ("pop", "mix_v3.wav");
+    const auto html = ma::buildHtmlReport (ctx);
+
+    CHECK (html.startsWith ("<!DOCTYPE html>"));
+    CHECK (html.trimEnd().endsWith ("</html>"));
+    CHECK (html.contains ("<meta charset=\"utf-8\">"));
+    CHECK (html.contains ("@media print"));
+    CHECK (count (html, "<section") == count (html, "</section>"));
+    CHECK (count (html, "<table") == count (html, "</table>"));
+    CHECK (count (html, "<div") == count (html, "</div>"));
+
+    CHECK (html.contains ("mix_v3.wav"));
+    CHECK (html.contains (">" + juce::String (ctx.comparison.score) + "</div>"));   // anello del punteggio
+    for (int a = 0; a < ma::kNumAreas; ++a)
+        CHECK (html.contains (ma::areaName ((ma::Area) a)));
+
+    // grafico tonale: target, fascia di tolleranza e master
+    CHECK (html.contains ("<svg"));
+    CHECK (html.contains ("<polygon"));
+    CHECK (count (html, "<polyline") == 2);
+    for (auto* band : ma::kBandNames)
+        CHECK (html.contains (band));
+
+    // ogni problema ha la sua scheda
+    int problems = 0;
+    for (const auto& f : ctx.comparison.findings)
+        problems += ! f.ignored && f.severity != ma::Severity::ok ? 1 : 0;
+    CHECK (count (html, "<div class=\"card ") == problems);
+
+    CHECK (html.contains ("Spotify"));            // anteprima streaming
+    CHECK_FALSE (html.contains ("data:image"));   // nessuno screenshot fornito
+}
+
+TEST_CASE ("HTML: screenshot incorporato, versione confrontata, diagnosi ignorate", "[report][html]")
+{
+    auto ctx = makeContext ("pop", "master.wav");
+
+    const char png[] = { '\x89', 'P', 'N', 'G', 1, 2, 3 };
+    ctx.screenshotPng = juce::MemoryBlock (png, sizeof (png));
+
+    ctx.hasVersion = true;
+    ctx.versionName = "v1 <prima>";
+    ctx.versionComparison.improved = 2;
+    ctx.versionComparison.scoreBefore = 40;
+    ctx.versionComparison.scoreNow = 72;
+    ma::FindingChange change;
+    change.metric = "PLR";
+    change.valueBefore = "6.1 dB";
+    change.valueNow = "8.0 dB";
+    change.verdict = ma::Verdict::better;
+    ctx.versionComparison.changes.push_back (change);
+
+    REQUIRE_FALSE (ctx.comparison.findings.empty());
+    ctx.comparison.findings.front().ignored = true;
+    const auto ignoredMetric = ctx.comparison.findings.front().metric;
+
+    const auto html = ma::buildHtmlReport (ctx);
+    CHECK (html.contains ("data:image/png;base64," + juce::Base64::toBase64 (png, sizeof (png))));
+    CHECK (html.contains ("v1 &lt;prima&gt;"));
+    CHECK (html.contains ("6.1 dB"));
+    CHECK (html.contains ("<b>72</b>"));
+    CHECK (html.contains ("Ignorate"));
+    CHECK (html.contains (ma::escapeHtml (ignoredMetric)));
+}
+
+TEST_CASE ("HTML: con un target broadcast niente curva tonale e streaming solo indicativo", "[report][html][broadcast]")
+{
+    const auto html = ma::buildHtmlReport (makeContext ("ebu_r128", "spot_tv.wav"));
+    CHECK (html.contains ("EBU R128"));
+    CHECK (html.contains ("<svg"));               // lo spettro resta, come informazione
+    CHECK_FALSE (html.contains ("<polygon"));     // ma senza target né tolleranze
+    CHECK (count (html, "<polyline") == 1);
+    CHECK (html.contains ("standard di consegna"));
+}
+
+TEST_CASE ("HTML: coerenza album con tabella dei brani e diagnosi per brano", "[report][html][album]")
+{
+    std::vector<ma::AnalysisSnapshot> snapshots;
+    juce::StringArray names;
+    for (int i = 0; i < 3; ++i)
+    {
+        auto b = test::pinkNoise (20.0, 0.5f, 20 + i);
+        if (i == 1)
+            b.applyGain (juce::Decibels::decibelsToGain (4.0f));   // un brano molto più forte degli altri
+        snapshots.push_back (test::analyse (b));
+        names.add ("0" + juce::String (i + 1) + " brano & co.wav");
+    }
+
+    const auto album = ma::checkAlbum (snapshots, names);
+    REQUIRE (album.isValid());
+    const auto html = ma::buildAlbumHtmlReport (album, "1.0.0");
+
+    CHECK (html.startsWith ("<!DOCTYPE html>"));
+    CHECK (html.trimEnd().endsWith ("</html>"));
+    CHECK (count (html, "<table") == count (html, "</table>"));
+    CHECK (count (html, "<div") == count (html, "</div>"));
+    CHECK (html.contains ("02 brano &amp; co.wav"));
+    CHECK (html.contains ("c-critical"));         // la sezione forte del brano 2 è fuori dall'album
+    CHECK (html.contains ("<div class=\"card critical\">"));
+}

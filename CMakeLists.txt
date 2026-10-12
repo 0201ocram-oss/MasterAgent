@@ -53,7 +53,10 @@ juce_add_binary_data(MasterAgentProfiles
         Resources/profiles/rock.json
         Resources/profiles/hiphop_trap.json
         Resources/profiles/edm_club.json
-        Resources/profiles/techno_house.json)
+        Resources/profiles/techno_house.json
+        Resources/profiles/ebu_r128.json
+        Resources/profiles/atsc_a85.json
+        Resources/profiles/podcast.json)
 
 # traduzioni dell'interfaccia (testo sorgente: italiano)
 juce_add_binary_data(MasterAgentLang
@@ -137,7 +140,8 @@ if(MASTERAGENT_BUILD_TESTS)
         Tests/ReportScoreTests.cpp
         Tests/SnapshotTests.cpp
         Tests/AlbumTests.cpp
-        Tests/TimelineTests.cpp)
+        Tests/TimelineTests.cpp
+        Tests/HtmlReportTests.cpp)
 
     target_include_directories(MasterAgentTests PRIVATE Source Tests)
 

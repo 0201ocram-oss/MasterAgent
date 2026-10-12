@@ -34,7 +34,7 @@ AlbumView::AlbumView() : Panel ("Coerenza album"_t, "panel:album")
     showButton.onClick = [this] { if (onShowTrack && selected >= 0) onShowTrack (selected); };
 
     exportButton.setButtonText ("Esporta"_t);
-    exportButton.setTooltip ("Salva la tabella dell'album come testo, CSV o immagine"_t);
+    exportButton.setTooltip ("Salva l'album come report HTML, testo, CSV o immagine"_t);
     exportButton.onClick = [this] { if (onExport) onExport(); };
 
     clearButton.onClick = [this] { if (onClear) onClear(); };
