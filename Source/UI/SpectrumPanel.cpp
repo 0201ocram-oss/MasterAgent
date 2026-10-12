@@ -343,7 +343,8 @@ void SpectrumPanel::drawSpectrum (juce::Graphics& g, juce::Rectangle<float> r)
 
     // istantaneo
     g.setColour (colours::text.withAlpha (0.3f));
-    g.strokePath (buildPath ([&] (int i) { return s.spectrumInstantDb[(size_t) i]; }, false), juce::PathStrokeType (1.0f));
+    const auto& now = d.instant();   // in ascolto: lo spettro di ciò che si sente
+    g.strokePath (buildPath ([&] (int i) { return now.spectrumInstantDb[(size_t) i]; }, false), juce::PathStrokeType (1.0f));
 
     // curve target/reference allineate al master nel range 63 Hz - 12.5 kHz
     // mediana degli scostamenti: una zona molto diversa (es. sibilanti) non sposta tutta la curva

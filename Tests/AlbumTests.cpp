@@ -97,11 +97,12 @@ TEST_CASE ("Coerenza album: solo il brano fuori posto viene segnalato, con il gu
 
     CHECK (album.warning + album.critical == 1);
 
-    // export: testo e CSV contengono tutti i brani
+    // export: testo e CSV contengono tutti i brani; le diagnosi con i consigli solo se richieste (CLI)
     const auto text = ma::buildAlbumTextReport (album);
     for (const auto& n : names)
         CHECK (text.contains (n));
-    CHECK (text.contains ("Abbassalo"));
+    CHECK_FALSE (text.contains ("Abbassalo"));
+    CHECK (ma::buildAlbumTextReport (album, true).contains ("Abbassalo"));
 
     const auto csv = juce::StringArray::fromLines (ma::buildAlbumCsv (album).trim());
     CHECK (csv.size() == 6);   // intestazione + 5 brani
@@ -125,6 +126,13 @@ TEST_CASE ("Coerenza album: brano molto più piano = critico con guadagno positi
     // stesso bilanciamento tonale: il guadagno non cambia la curva normalizzata
     CHECK (album.tracks[1].tonal == ma::Severity::ok);
 
-    // meno di 2 brani: nessun confronto possibile
-    CHECK_FALSE (ma::checkAlbum ({ snapshots.front() }, { "a.wav" }).isValid());
+    // meno di 2 brani: nessun confronto possibile, ma il brano ha la sua riga (si aggiungono uno alla volta)
+    const auto single = ma::checkAlbum ({ snapshots.front() }, { "a.wav" });
+    CHECK_FALSE (single.isValid());
+    REQUIRE (single.tracks.size() == 1);
+    CHECK (single.tracks[0].name == "a.wav");
+    CHECK (single.tracks[0].loudestDeltaLu == Approx (0.0f).margin (0.01));
+    CHECK (single.tracks[0].findings.empty());
+    CHECK (single.tracks[0].worst == ma::Severity::ok);
+    CHECK (ma::checkAlbum ({}, {}).tracks.empty());
 }

@@ -116,7 +116,7 @@ namespace
             return 1;
         }
 
-        std::printf ("\n%s", ma::buildAlbumTextReport (album).toRawUTF8());
+        std::printf ("\n%s", ma::buildAlbumTextReport (album, true).toRawUTF8());
 
         if (const auto html = juce::SystemStats::getEnvironmentVariable ("MA_HTML", {}); html.isNotEmpty())
         {

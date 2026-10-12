@@ -15,7 +15,10 @@ namespace
         static const std::map<juce::String, const char*> map {
             // --- pannelli (testo generico quando il mouse non è su un valore) ---------------------------
             { "panel:loudness",  "Loudness (EBU R128 / BS.1770-4)\nIl volume percepito del brano: integrated, short-term, momentary, "
-                                 "LRA e la cronologia nel tempo. Passa il mouse su un valore per sapere cosa misura." },
+                                 "LRA e la cronologia nel tempo. Passa il mouse su un valore per sapere cosa misura. "
+                                 "Nell'app, mentre ascolti il brano (badge LIVE), momentary, short-term, meter dei picchi, spettro "
+                                 "istantaneo, correlazione e goniometro seguono la riproduzione; i valori del brano intero restano "
+                                 "quelli dell'analisi del file." },
             { "panel:peak",      "Peak e controlli tecnici\nPicchi reali (true peak) e digitali, eventi oltre la soglia, clipping, "
                                  "DC offset e rumore di fondo: tutto ciò che può distorcere o sprecare headroom." },
             { "panel:dynamics",  "Dinamica\nQuanto il brano è compresso o limitato: PLR, PSR, DR, crest factor per banda e la "
@@ -46,14 +49,14 @@ namespace
             { "history",      "Cronologia della loudness\nShort-term nel tempo, un punto ogni 100 ms. Fascia gialla = range "
                               "integrated del target, tratteggio = integrated attuale, linea viola = integrated del reference. "
                               "Le diagnosi legate a un tratto del brano lo evidenziano qui. La linea grigia tenue è la versione salvata "
-                              "con cui stai confrontando il master." },
+                              "con cui stai confrontando il master. Nell'app la linea verticale chiara è il punto in ascolto." },
 
             // --- peak e tecnici --------------------------------------------------------------------------
             { "truePeak",     "True peak max (dBTP)\nIl picco più alto del segnale ricostruito (sovracampionato, BS.1770-4), "
                               "cioè il livello che raggiungerà dopo la conversione D/A o la codifica MP3/AAC. Per lo streaming "
                               "si consiglia di restare sotto -1 dBTP." },
             { "tpMeters",     "Meter true peak L / R\nLivello attuale del picco ricostruito per ciascun canale. La scala diventa "
-                              "rossa vicino a 0 dBTP." },
+                              "rossa vicino a 0 dBTP. Nell'app, mentre ascolti il brano, mostrano il picco degli ultimi secondi." },
             { "samplePeak",   "Sample peak L / R (dBFS)\nPicco più alto dei campioni digitali per canale. Può essere più basso del "
                               "true peak perché non vede i picchi tra un campione e l'altro (inter-sample)." },
             { "recentTp",     "TP recente (3 s)\nTrue peak massimo degli ultimi 3 secondi: mostra subito l'effetto di una "
@@ -156,8 +159,16 @@ namespace
             { "album:summary",    "Riepilogo dell'album\nQuanti brani escono dall'album, la loudness mediana della sezione più forte "
                                   "e la differenza tra il brano più forte e il più piano. Il confronto tonale usa i ritornelli "
                                   "(sezione più forte) quando tutti i brani ne hanno una." },
-            { "album:row",        "Brani\nUna riga per brano, nell'ordine dei nomi dei file. Clic per vedere le sue diagnosi a destra, "
-                                  "doppio clic per aprirlo nella dashboard (analisi completa con il target attivo, forma d'onda e ascolto)." },
+            { "album:row",        "Brani\nUna riga per brano, nell'ordine in cui li aggiungi (i file scelti insieme seguono il nome). "
+                                  "Clic per vedere le sue diagnosi a destra, doppio clic per aprirlo nella dashboard (analisi completa "
+                                  "con il target attivo, forma d'onda e ascolto), × o il tasto Canc per toglierlo dall'album." },
+            { "album:add",        "Aggiungi brano\nScegli uno o più file da aggiungere all'album (fino a 30 brani): ognuno viene "
+                                  "analizzato per intero e compare nella tabella appena è pronto. Puoi anche trascinare i file "
+                                  "sulla finestra." },
+            { "album:pending",    "Brani in analisi\nFile in attesa: si analizzano uno alla volta, offline. \"Interrompi\" svuota la "
+                                  "coda e tiene i brani già analizzati." },
+            { "album:remove",     "Rimuovi dall'album\nToglie il brano dalla tabella: mediana e confronto si ricalcolano sugli altri. "
+                                  "Il file non viene toccato." },
             { "album:median",     "Mediana dell'album\nIl riferimento comune: il valore centrale tra i brani. Al contrario della media "
                                   "non si sposta per un brano fuori posto, che così risulta segnalato da solo." },
             { "album:integrated", "Integrated (LUFS)\nLoudness media del brano intero. Solo informativa: ballate e brani con più dinamica "

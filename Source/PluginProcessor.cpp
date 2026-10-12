@@ -51,6 +51,9 @@ void MasterAgentProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     {
         player.prepare (sampleRate, samplesPerBlock);
         reference.setHostSampleRate (sampleRate);
+        liveAnalysis.prepare (sampleRate, 2);
+        liveAnalysis.setLiveMode (true, playbackWindowSeconds);
+        playbackSeeks = -1;
         return;
     }
 
@@ -73,7 +76,22 @@ void MasterAgentProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     // standalone: l'uscita è il lettore, oppure il reference durante l'ascolto A/B
     if (standalone)
     {
+        const bool playing = player.isPlaying();
         player.render (buffer);
+
+        // brano in ascolto: l'analisi dal vivo dà i valori istantanei della dashboard (anche durante l'A/B resta sul brano)
+        if (playing && buffer.getNumChannels() > 0)
+        {
+            // dopo un salto (clic sulla forma d'onda, nuovo brano) i meter ripartono da zero
+            if (const int seeks = player.getSeekCount(); seeks != playbackSeeks)
+            {
+                playbackSeeks = seeks;
+                liveAnalysis.requestReset();
+            }
+            liveAnalysis.push (buffer.getReadPointer (0), buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : nullptr,
+                               buffer.getNumSamples());
+        }
+
         if (listenReference.load() && buffer.getNumChannels() > 0)
             reference.renderPlayback (buffer.getWritePointer (0), buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr,
                                       buffer.getNumSamples(), referenceGain.load());
@@ -129,7 +147,9 @@ void MasterAgentProcessor::setLiveMode (bool shouldBeLive, double windowSeconds)
 {
     liveMode.store (shouldBeLive);
     liveWindowSeconds.store (windowSeconds);
-    liveAnalysis.setLiveMode (shouldBeLive, windowSeconds);
+    // standalone: l'analisi dal vivo segue il lettore con la sua finestra, la modalità della DAW non la riguarda
+    if (! standalone)
+        liveAnalysis.setLiveMode (shouldBeLive, windowSeconds);
 }
 
 void MasterAgentProcessor::loadReference (const juce::File& file)
@@ -351,26 +371,76 @@ void MasterAgentProcessor::setCompareVersion (int index)
 }
 
 //==============================================================================
-void MasterAgentProcessor::startAlbumCheck (const juce::Array<juce::File>& files)
+int MasterAgentProcessor::addAlbumTracks (const juce::Array<juce::File>& files)
 {
-    auto list = files;
-    list.removeRange (ma::album::maxTracks, list.size());
+    int added = 0;
     {
         const juce::ScopedLock lock (settingsLock);
-        album = {};
-        albumState = AlbumState::analysing;
+        for (const auto& file : files)
+        {
+            const int size = album.files.size() + albumQueue.size() + (albumCurrent != juce::File() ? 1 : 0);
+            if (size >= ma::album::maxTracks)
+                break;
+            if (album.files.contains (file) || albumQueue.contains (file) || file == albumCurrent)
+                continue;
+            albumQueue.add (file);
+            ++added;
+        }
     }
-    albumJob.start (list, "Album"_t, standalone);
+
+    if (added > 0)
+    {
+        startNextAlbumTrack();
+        ++albumRevision;
+    }
+    return added;
+}
+
+void MasterAgentProcessor::startNextAlbumTrack()
+{
+    juce::File next;
+    {
+        const juce::ScopedLock lock (settingsLock);
+        if (albumCurrent != juce::File() || albumQueue.isEmpty())
+            return;
+        next = albumCurrent = albumQueue.removeAndReturn (0);
+    }
+    // un file per job: ogni brano compare nell'album appena è analizzato
+    albumJob.start ({ next }, "Album"_t, standalone);
+}
+
+void MasterAgentProcessor::removeAlbumTrack (int index)
+{
+    {
+        const juce::ScopedLock lock (settingsLock);
+        if (! juce::isPositiveAndBelow (index, (int) album.snapshots.size()))
+            return;
+        album.snapshots.erase (album.snapshots.begin() + index);
+        album.files.remove (index);
+        album.names.remove (index);
+        if ((size_t) index < album.timelines.size())
+            album.timelines.erase (album.timelines.begin() + index);
+    }
+    ++albumRevision;
+}
+
+void MasterAgentProcessor::stopAlbumAnalysis()
+{
+    albumJob.cancel();
+    {
+        const juce::ScopedLock lock (settingsLock);
+        albumQueue.clear();
+        albumCurrent = juce::File();
+    }
     ++albumRevision;
 }
 
 void MasterAgentProcessor::clearAlbum()
 {
-    albumJob.cancel();
+    stopAlbumAnalysis();
     {
         const juce::ScopedLock lock (settingsLock);
         album = {};
-        albumState = AlbumState::none;
     }
     ++albumRevision;
 }
@@ -383,22 +453,46 @@ void MasterAgentProcessor::updateAlbum()
     auto results = albumJob.takeResults();
     {
         const juce::ScopedLock lock (settingsLock);
-        if (albumState != AlbumState::analysing)
-            return;
-        album.snapshots = std::move (results.snapshots);
-        album.files = results.files;
-        album.names = results.names;
-        album.skipped = results.skipped;
-        album.timelines = std::move (results.timelines);
-        albumState = AlbumState::ready;
+        if (albumCurrent == juce::File())
+            return;   // svuotato nel frattempo
+        albumCurrent = juce::File();
+
+        for (size_t i = 0; i < results.snapshots.size(); ++i)
+        {
+            album.snapshots.push_back (std::move (results.snapshots[i]));
+            album.files.add (results.files[(int) i]);
+            album.names.add (results.names[(int) i]);
+            album.timelines.push_back (i < results.timelines.size() ? results.timelines[i] : nullptr);
+        }
+        album.skipped.addArray (results.skipped);
     }
+    startNextAlbumTrack();
     ++albumRevision;
 }
 
 MasterAgentProcessor::AlbumState MasterAgentProcessor::getAlbumState() const
 {
     const juce::ScopedLock lock (settingsLock);
-    return albumState;
+    if (albumCurrent != juce::File() || ! albumQueue.isEmpty())
+        return AlbumState::analysing;
+    return album.snapshots.empty() ? AlbumState::none : AlbumState::ready;
+}
+
+juce::StringArray MasterAgentProcessor::getAlbumPending() const
+{
+    const juce::ScopedLock lock (settingsLock);
+    juce::StringArray names;
+    if (albumCurrent != juce::File())
+        names.add (albumCurrent.getFileName());
+    for (const auto& file : albumQueue)
+        names.add (file.getFileName());
+    return names;
+}
+
+int MasterAgentProcessor::getAlbumSize() const
+{
+    const juce::ScopedLock lock (settingsLock);
+    return (int) album.snapshots.size() + albumQueue.size() + (albumCurrent != juce::File() ? 1 : 0);
 }
 
 MasterAgentProcessor::AlbumData MasterAgentProcessor::getAlbum() const

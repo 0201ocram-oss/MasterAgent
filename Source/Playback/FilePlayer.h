@@ -35,6 +35,9 @@ public:
     double getPosition() const;
     double getLength() const;
 
+    /** Cresce a ogni salto di posizione (nuovo brano, setPosition, ripartenza dall'inizio). Si legge anche dall'audio thread. */
+    int getSeekCount() const noexcept { return seekCount.load(); }
+
 private:
     juce::AudioFormatManager formats;
     juce::TimeSliceThread readAheadThread { "MasterAgent player" };
@@ -42,6 +45,7 @@ private:
     juce::AudioTransportSource transport;
     juce::File file;
     bool prepared = false;
+    std::atomic<int> seekCount { 0 };
 
     JUCE_DECLARE_NON_COPYABLE (FilePlayer)
 };

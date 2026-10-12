@@ -103,8 +103,21 @@ TEST_CASE ("Master troppo forte per Spotify: verrà abbassato, da verificare ma 
     for (size_t i = 1; i < result.findings.size(); ++i)   // ordinati per severità
         CHECK (result.findings[i - 1].severity >= result.findings[i].severity);
 
-    CHECK (ma::buildTextReport (s, result, spotify->name).contains ("Integrated"));
-    CHECK (juce::JSON::parse (ma::buildJsonReport (s, result, spotify->name)).isObject());
+    // export: solo i dati del master, senza punteggio né consigli
+    const auto text = ma::buildTextReport (s, result, spotify->name);
+    CHECK (text.contains ("Integrated"));
+    CHECK_FALSE (text.contains ("DIAGNOSI"));
+    CHECK_FALSE (text.contains ("Punteggio"));
+    for (const auto& f : result.findings)
+        if (f.action.isNotEmpty())
+            CHECK_FALSE (text.contains (f.action));
+
+    const auto json = juce::JSON::parse (ma::buildJsonReport (s, result, spotify->name));
+    REQUIRE (json.isObject());
+    CHECK (json.hasProperty ("metrics"));
+    CHECK_FALSE (json.hasProperty ("findings"));
+    CHECK_FALSE (json.hasProperty ("eqMoves"));
+    CHECK_FALSE (json.hasProperty ("score"));
 }
 
 TEST_CASE ("Fase invertita segnalata", "[compare]")

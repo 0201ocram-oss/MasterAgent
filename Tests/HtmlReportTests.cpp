@@ -43,7 +43,7 @@ TEST_CASE ("HTML: il testo viene messo in sicurezza", "[report][html]")
     CHECK_FALSE (html.contains ("<mix&v3>"));
 }
 
-TEST_CASE ("HTML: documento completo con pagella, misure, grafico tonale e diagnosi", "[report][html]")
+TEST_CASE ("HTML: documento completo con misure e grafico tonale, senza consigli", "[report][html]")
 {
     const auto ctx = makeContext ("pop", "mix_v3.wav");
     const auto html = ma::buildHtmlReport (ctx);
@@ -57,9 +57,9 @@ TEST_CASE ("HTML: documento completo con pagella, misure, grafico tonale e diagn
     CHECK (count (html, "<div") == count (html, "</div>"));
 
     CHECK (html.contains ("mix_v3.wav"));
-    CHECK (html.contains (">" + juce::String (ctx.comparison.score) + "</div>"));   // anello del punteggio
-    for (int a = 0; a < ma::kNumAreas; ++a)
-        CHECK (html.contains (ma::areaName ((ma::Area) a)));
+    CHECK (html.contains ("Integrated"));
+    CHECK (html.contains ("True peak max"));
+    CHECK (html.contains ("PLR"));
 
     // grafico tonale: target, fascia di tolleranza e master
     CHECK (html.contains ("<svg"));
@@ -68,17 +68,25 @@ TEST_CASE ("HTML: documento completo con pagella, misure, grafico tonale e diagn
     for (auto* band : ma::kBandNames)
         CHECK (html.contains (band));
 
-    // ogni problema ha la sua scheda
-    int problems = 0;
+    // solo i dati del master: niente pagella, priorità, mosse EQ né diagnosi con i consigli
+    REQUIRE_FALSE (ctx.comparison.findings.empty());
+    CHECK_FALSE (html.contains ("class=\"ring"));
+    CHECK_FALSE (html.contains ("Pagella"));
+    CHECK_FALSE (html.contains ("<div class=\"card"));
+    CHECK_FALSE (html.contains ("Mosse EQ"));
     for (const auto& f : ctx.comparison.findings)
-        problems += ! f.ignored && f.severity != ma::Severity::ok ? 1 : 0;
-    CHECK (count (html, "<div class=\"card ") == problems);
+    {
+        if (f.action.isNotEmpty())
+            CHECK_FALSE (html.contains (ma::escapeHtml (f.action)));
+        if (f.severity != ma::Severity::ok)
+            CHECK_FALSE (html.contains (ma::escapeHtml (f.message)));
+    }
 
     CHECK (html.contains ("Spotify"));            // anteprima streaming
     CHECK_FALSE (html.contains ("data:image"));   // nessuno screenshot fornito
 }
 
-TEST_CASE ("HTML: screenshot incorporato, versione confrontata, diagnosi ignorate", "[report][html]")
+TEST_CASE ("HTML: immagine incorporata e versione confrontata", "[report][html]")
 {
     auto ctx = makeContext ("pop", "master.wav");
 
@@ -97,17 +105,12 @@ TEST_CASE ("HTML: screenshot incorporato, versione confrontata, diagnosi ignorat
     change.verdict = ma::Verdict::better;
     ctx.versionComparison.changes.push_back (change);
 
-    REQUIRE_FALSE (ctx.comparison.findings.empty());
-    ctx.comparison.findings.front().ignored = true;
-    const auto ignoredMetric = ctx.comparison.findings.front().metric;
-
     const auto html = ma::buildHtmlReport (ctx);
     CHECK (html.contains ("data:image/png;base64," + juce::Base64::toBase64 (png, sizeof (png))));
     CHECK (html.contains ("v1 &lt;prima&gt;"));
     CHECK (html.contains ("6.1 dB"));
-    CHECK (html.contains ("<b>72</b>"));
-    CHECK (html.contains ("Ignorate"));
-    CHECK (html.contains (ma::escapeHtml (ignoredMetric)));
+    CHECK (html.contains ("8.0 dB"));
+    CHECK_FALSE (html.contains ("<b>72</b>"));   // il punteggio resta nel plugin
 }
 
 TEST_CASE ("HTML: con un target broadcast niente curva tonale e streaming solo indicativo", "[report][html][broadcast]")
@@ -120,7 +123,7 @@ TEST_CASE ("HTML: con un target broadcast niente curva tonale e streaming solo i
     CHECK (html.contains ("standard di consegna"));
 }
 
-TEST_CASE ("HTML: coerenza album con tabella dei brani e diagnosi per brano", "[report][html][album]")
+TEST_CASE ("HTML: coerenza album con la tabella dei brani, senza consigli", "[report][html][album]")
 {
     std::vector<ma::AnalysisSnapshot> snapshots;
     juce::StringArray names;
@@ -143,5 +146,8 @@ TEST_CASE ("HTML: coerenza album con tabella dei brani e diagnosi per brano", "[
     CHECK (count (html, "<div") == count (html, "</div>"));
     CHECK (html.contains ("02 brano &amp; co.wav"));
     CHECK (html.contains ("c-critical"));         // la sezione forte del brano 2 è fuori dall'album
-    CHECK (html.contains ("<div class=\"card critical\">"));
+    CHECK_FALSE (html.contains ("<div class=\"card"));
+    for (const auto& f : album.tracks[1].findings)
+        if (f.action.isNotEmpty())
+            CHECK_FALSE (html.contains (ma::escapeHtml (f.action)));
 }

@@ -127,6 +127,16 @@ struct DashboardData
     bool masterFromFile = false;              // il master è un file analizzato offline, non l'ingresso live
     juce::String masterFileName;
 
+    // app standalone, ascolto del brano: i valori istantanei (momentary, short-term, picchi recenti, spettro
+    // istantaneo, correlazione, goniometro) vengono dalla riproduzione, quelli del brano intero dall'analisi del file
+    bool playing = false;                     // il lettore sta suonando
+    bool playbackLive = false;                // il brano è stato ascoltato: playback contiene i valori dell'ascolto
+    AnalysisSnapshot playback;
+    double playbackSeconds = -1.0;            // posizione del lettore (s), -1 = nessun lettore
+
+    /** Valori istantanei da mostrare: quelli dell'ascolto se ci sono, altrimenti quelli dell'analisi. */
+    const AnalysisSnapshot& instant() const noexcept { return playbackLive ? playback : master; }
+
     bool hasVersion = false;                  // versione salvata con cui confrontare il master
     AnalysisSnapshot version;
     juce::String versionName;

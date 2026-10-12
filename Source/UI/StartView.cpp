@@ -143,7 +143,7 @@ void StartView::paintCard (juce::Graphics& g, juce::Rectangle<float> r, Card car
     g.setFont (fonts::label (13.0f));
     const auto text = card == track
         ? "Report completo del master, forma d'onda con i problemi segnati nel punto in cui avvengono e ascolto dal punto che ti interessa."_t
-        : "Da 2 a 30 brani confrontati con il resto dell'album: loudness, tono, larghezza e picchi, per un disco coerente."_t;
+        : "Fino a 30 brani, anche aggiunti uno alla volta, confrontati con il resto dell'album: loudness, tono, larghezza e picchi."_t;
     g.drawFittedText (text, inner.removeFromTop (54.0f).toNearestInt(), juce::Justification::centredTop, 3, 1.0f);
 
     g.setColour (isHovered ? colours::accent : colours::accent.withAlpha (0.75f));

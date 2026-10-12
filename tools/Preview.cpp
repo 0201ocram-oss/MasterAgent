@@ -319,7 +319,7 @@ int main (int argc, char* argv[])
                 names.add (sp.name);
             }
             const auto album = ma::checkAlbum (snaps, names);
-            std::printf ("%s\n", ma::buildAlbumTextReport (album).toRawUTF8());
+            std::printf ("%s\n", ma::buildAlbumTextReport (album, true).toRawUTF8());
 
             ma::ui::AlbumView view;
             view.setBounds (0, 0, 1416, 816);
@@ -340,12 +340,38 @@ int main (int argc, char* argv[])
             ma::ui::applyTheme ({});
             lnf.refreshColours();
             view.sendLookAndFeelChange();
-            view.setProgress (true, "Album: 3/12  03 Vetro.wav 40%", 0.4f);
-            const auto image = view.createComponentSnapshot (view.getLocalBounds(), true, 1.0f);
-            const auto out = outDir.getChildFile ("preview_album_progress.png");
-            out.deleteFile();
-            juce::FileOutputStream stream (out);
-            juce::PNGImageFormat().writeImageToStream (image, stream);
+            auto save = [&] (const char* name)
+            {
+                const auto image = view.createComponentSnapshot (view.getLocalBounds(), true, 1.0f);
+                const auto out = outDir.getChildFile (name);
+                out.deleteFile();
+                juce::FileOutputStream stream (out);
+                juce::PNGImageFormat().writeImageToStream (image, stream);
+            };
+
+            // brani aggiunti mentre l'analisi continua: due in coda, il primo al 40%
+            view.setPending ({ "06 Demo.wav", "07 Coda.wav" }, 0.4f);
+            save ("preview_album_progress.png");
+
+            // un solo brano: manca il confronto, la tabella invita ad aggiungerne altri
+            view.setPending ({}, 0.0f);
+            view.setAlbum (ma::checkAlbum ({ snaps.front() }, { names[0] }), {});
+            save ("preview_album_one.png");
+
+            // album vuoto
+            view.setAlbum ({}, {});
+            save ("preview_album_empty.png");
+
+            // immagine esportata: solo la tabella
+            view.setAlbum (album, {});
+            view.createComponentSnapshot (view.getLocalBounds(), true, 1.0f);   // il paint calcola la larghezza della tabella
+            {
+                const auto image = view.createTableImage();
+                const auto out = outDir.getChildFile ("preview_album_export.png");
+                out.deleteFile();
+                juce::FileOutputStream stream (out);
+                juce::PNGImageFormat().writeImageToStream (image, stream);
+            }
         }
 
         // app standalone: schermata iniziale, brano con forma d'onda, segni dei problemi e lettore
@@ -399,6 +425,17 @@ int main (int argc, char* argv[])
                 }
             dash.waveform.setIgnored (ignored, {});
             dash.waveform.setPlayback (17.3, true);
+
+            // ascolto in corso a 17.3 s: i valori istantanei vengono da un'analisi del solo ritornello (24-32 s)
+            {
+                juce::AudioBuffer<float> chorus (2, (int) (8.0 * sr));
+                for (int ch = 0; ch < 2; ++ch)
+                    chorus.copyFrom (ch, 0, track, ch, (int) (24.0 * sr), chorus.getNumSamples());
+                ma::analyseBuffer (chorus, sr, sdata.playback);
+                sdata.playing = true;
+                sdata.playbackLive = true;
+                sdata.playbackSeconds = 17.3;
+            }
             dash.setData (sdata);
             for (auto theme : { ma::ui::ThemeId::dark, ma::ui::ThemeId::light })
             {
@@ -496,7 +533,7 @@ int main (int argc, char* argv[])
                                  "panel:spectrum", "panel:stereo", "panel:streaming", "panel:report",
                                  "panel:album", "album:summary", "album:row", "album:median", "album:integrated", "album:loudest",
                                  "album:delta", "album:gain", "album:tp", "album:width", "album:status", "album:details",
-                                 "album:tonalChart", "album:band:0", "album:band:7",
+                                 "album:tonalChart", "album:band:0", "album:band:7", "album:add", "album:pending", "album:remove",
                                  "panel:waveform", "wave:overview", "wave:legend", "wave:transport" })
             if (ma::ui::helpTextFor (key).isEmpty())
             {

@@ -143,18 +143,26 @@ public:
 
     //==============================================================================
     /**
-        Coerenza album: 2-30 file analizzati in background. I risultati restano qui (anche a editor chiuso)
-        finché non vengono svuotati; non sono salvati nel progetto.
+        Coerenza album: fino a album::maxTracks brani, aggiunti anche uno alla volta. I file si analizzano in
+        background uno dopo l'altro e ognuno entra nell'album appena è pronto. I risultati restano qui (anche
+        a editor chiuso) finché non vengono svuotati; non sono salvati nel progetto.
     */
-    void startAlbumCheck (const juce::Array<juce::File>& files);
-    void clearAlbum();   // interrompe anche un'analisi in corso
-    /** Da chiamare periodicamente (timer dell'editor): raccoglie il risultato del job concluso. */
+    /** Mette in coda i file (quelli già nell'album si saltano). Restituisce quanti ne ha aggiunti. */
+    int addAlbumTracks (const juce::Array<juce::File>& files);
+    void removeAlbumTrack (int index);
+    void stopAlbumAnalysis();   // svuota la coda; i brani già analizzati restano
+    void clearAlbum();          // toglie tutti i brani, interrompendo anche l'analisi
+    /** Da chiamare periodicamente (timer dell'editor): raccoglie il brano analizzato e passa al successivo. */
     void updateAlbum();
 
+    /** none = nessun brano e niente in coda; analysing = c'è almeno un file in coda. */
     enum class AlbumState { none, analysing, ready };
     AlbumState getAlbumState() const;
-    juce::String getAlbumStatusText() const { return albumJob.getStatusText(); }
     float getAlbumProgress() const noexcept   { return albumJob.getProgress(); }
+    /** Nomi dei file in attesa: il primo è quello in analisi. */
+    juce::StringArray getAlbumPending() const;
+    /** Brani analizzati più quelli in coda. */
+    int getAlbumSize() const;
 
     struct AlbumData
     {
@@ -197,13 +205,23 @@ private:
     int compareVersion = -1;
     std::atomic<int> versionsRevision { 0 };
 
+    void startNextAlbumTrack();
+
     ma::BatchAnalysisJob albumJob;
     AlbumData album;
-    AlbumState albumState = AlbumState::none;
+    juce::File albumCurrent;                  // file in analisi (vuoto = nessuno)
+    juce::Array<juce::File> albumQueue;       // file in attesa, nell'ordine di aggiunta
     std::atomic<int> albumRevision { 0 };
 
     double currentSampleRate = 48000.0;
     bool wasPlaying = false;
+
+    /**
+        Standalone: liveAnalysis segue il brano mentre si ascolta, per i valori istantanei della dashboard.
+        Finestra breve: i meter dei picchi tengono gli ultimi secondi, come nella modalità Live della DAW.
+    */
+    static constexpr double playbackWindowSeconds = 6.0;
+    int playbackSeeks = -1;                   // salti del lettore già visti dall'audio thread
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MasterAgentProcessor)
 };

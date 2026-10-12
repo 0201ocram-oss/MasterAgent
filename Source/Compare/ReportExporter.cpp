@@ -16,17 +16,7 @@ juce::String buildTextReport (const AnalysisSnapshot& s, const ComparisonResult&
     t << "MASTERAGENT - REPORT DI ANALISI\n"
       << "Data: " << juce::Time::getCurrentTime().toString (true, true) << "\n"
       << "Target: " << targetName << "   Fase: " << phaseName (c.phase) << (c.tonalUsesLoudest ? "   (tonale sulla sezione più forte)"_u : juce::String()) << "\n"
-      << "Durata analizzata: " << juce::String (s.secondsAnalyzed, 1) << " s   Sample rate: " << juce::String (juce::roundToInt (s.sampleRate)) << " Hz\n"
-      << "Punteggio indicativo: " << c.score << "/100   (critici " << c.count (Severity::critical)
-      << ", attenzione " << c.count (Severity::warning) << ")\n";
-
-    t << "Pagella:"_t;
-    for (int a = 0; a < kNumAreas; ++a)
-    {
-        const auto& area = c.areas[(size_t) a];
-        t << "  " << areaName ((Area) a) << " " << (area.evaluated ? juce::String (area.score) : juce::String ("n/d"));
-    }
-    t << "\n\n";
+      << "Durata analizzata: " << juce::String (s.secondsAnalyzed, 1) << " s   Sample rate: " << juce::String (juce::roundToInt (s.sampleRate)) << " Hz\n\n";
 
     t << "== LOUDNESS ==\n"
       << "Integrated: " << num (s.integratedLufs) << " LUFS   LRA: " << num (s.loudnessRange) << " LU\n"
@@ -34,9 +24,11 @@ juce::String buildTextReport (const AnalysisSnapshot& s, const ComparisonResult&
       << "RMS: " << num (s.rmsDb) << " dBFS\n\n";
 
     t << "== PEAK ==\n"
-      << "True peak L/R: " << num (s.truePeakDb[0], 2) << " / " << num (s.truePeakDb[1], 2) << " dBTP\n"
+      << "True peak max: " << num (s.truePeakMaxDb, 2) << " dBTP   L/R: " << num (s.truePeakDb[0], 2) << " / " << num (s.truePeakDb[1], 2) << " dBTP\n"
       << "Sample peak L/R: " << num (s.samplePeakDb[0], 2) << " / " << num (s.samplePeakDb[1], 2) << " dBFS\n"
-      << "Eventi > -1 dBTP: " << s.overs1dB << "   > 0 dBTP: " << s.overs0dB << "   Clip: " << s.clipEvents << "\n\n";
+      << "Eventi > -1 dBTP: " << s.overs1dB << "   > 0 dBTP: " << s.overs0dB << "   Clip: " << s.clipEvents
+      << " (" << s.clipEventsFullScale << " a fondo scala)\n"
+      << "DC offset L/R: " << num (s.dcOffsetDb[0]) << " / " << num (s.dcOffsetDb[1]) << " dBFS   Noise floor: " << num (s.noiseFloorDb) << " dBFS\n\n";
 
     t << "== DINAMICA ==\n"
       << "PLR: " << num (s.plr) << " dB   PSR min: " << num (s.minPsr) << " dB   Crest: " << num (s.crestDb) << " dB   DR: "
@@ -72,19 +64,6 @@ juce::String buildTextReport (const AnalysisSnapshot& s, const ComparisonResult&
         t << "\n";
     }
 
-    if (! c.eqMoves.empty())
-    {
-        t << "\n== MOSSE EQ SUGGERITE ==\n";
-        for (size_t i = 0; i < c.eqMoves.size(); ++i)
-        {
-            const auto& m = c.eqMoves[i];
-            juce::StringArray bands;
-            for (int b : m.bands) bands.add (kBandNames[(size_t) b]);
-            t << "  " << (int) (i + 1) << ". " << m.describe (m.shownGainDb) << "   (stimato " << juce::String (m.gainDb, 1)
-              << " dB; corregge " << bands.joinIntoString (", ") << ")" << (m.fixInMix ? "  -> il resto nel mix" : "") << "\n";
-        }
-    }
-
     t << "\n== STEREO ==\n"
       << "Correlazione: " << juce::String (s.correlation, 2) << "   Larghezza: " << juce::String (juce::roundToInt (s.widthPercent)) << "%   Bilanciamento: "
       << juce::String (s.balanceDb, 2) << " dB   Perdita mono: " << juce::String (s.monoLossDb, 1) << " dB\n";
@@ -97,38 +76,6 @@ juce::String buildTextReport (const AnalysisSnapshot& s, const ComparisonResult&
         t << "  " << juce::String (r.name).paddedRight (' ', 14) << "guadagno " << (r.gainDb >= 0 ? "+" : "") << juce::String (r.gainDb, 1)
           << " dB -> " << juce::String (r.playbackLufs, 1) << " LUFS, TP " << juce::String (r.playbackTruePeak, 1) << " dBTP\n";
 
-    if (! c.priorities.empty())
-    {
-        t << "\n== DA FARE PRIMA ==\n";
-        int n = 1;
-        for (const auto& f : c.priorities)
-            t << "  " << n++ << ". " << f.metric << ": " << f.value << "\n";
-    }
-
-    t << "\n== DIAGNOSI ==\n";
-    for (const auto& f : c.findings)
-    {
-        if (f.severity == Severity::ok || f.ignored)
-            continue;
-        t << "[" << severityName (f.severity).toUpperCase() << "] " << f.category << " - " << f.metric << ": " << f.value
-          << "  (target " << f.target << ")\n    " << f.message << "\n";
-        if (f.action.isNotEmpty())
-            t << "    -> " << f.action << "\n";
-    }
-
-    t << "\n== NEL RANGE ==\n";
-    for (const auto& f : c.findings)
-        if (f.severity == Severity::ok && ! f.ignored)
-            t << "  " << f.category << " - " << f.metric << ": " << f.value << "\n";
-
-    if (c.countIgnored() > 0)
-    {
-        t << "\n" << "== IGNORATE (scelte volute) =="_t << "\n";
-        for (const auto& f : c.findings)
-            if (f.ignored)
-                t << "  " << f.category << " - " << f.metric << ": " << f.value << "\n";
-    }
-
     return t;
 }
 
@@ -139,17 +86,6 @@ juce::String buildJsonReport (const AnalysisSnapshot& s, const ComparisonResult&
     root->setProperty ("date", juce::Time::getCurrentTime().toISO8601 (true));
     root->setProperty ("secondsAnalyzed", s.secondsAnalyzed);
     root->setProperty ("sampleRate", s.sampleRate);
-    root->setProperty ("score", c.score);
-    {
-        static const char* areaKeys[] = { "loudness", "dynamics", "tonal", "stereo", "technical" };
-        auto* areas = new juce::DynamicObject();
-        for (int a = 0; a < kNumAreas; ++a)
-        {
-            const auto& area = c.areas[(size_t) a];
-            areas->setProperty (areaKeys[a], area.evaluated ? juce::var (area.score) : juce::var());
-        }
-        root->setProperty ("areas", juce::var (areas));
-    }
     root->setProperty ("phase", phaseName (c.phase));
     root->setProperty ("tonalUsesLoudestSection", c.tonalUsesLoudest);
 
@@ -164,6 +100,10 @@ juce::String buildJsonReport (const AnalysisSnapshot& s, const ComparisonResult&
     m->setProperty ("overs0dB", s.overs0dB);
     m->setProperty ("overs1dB", s.overs1dB);
     m->setProperty ("clipEvents", s.clipEvents);
+    m->setProperty ("clipEventsFullScale", s.clipEventsFullScale);
+    m->setProperty ("dcOffsetL", s.dcOffsetDb[0]);
+    m->setProperty ("dcOffsetR", s.dcOffsetDb[1]);
+    m->setProperty ("noiseFloor", s.noiseFloorDb);
     m->setProperty ("plr", s.plr);
     m->setProperty ("minPsr", s.minPsr);
     m->setProperty ("crest", s.crestDb);
@@ -174,6 +114,8 @@ juce::String buildJsonReport (const AnalysisSnapshot& s, const ComparisonResult&
     m->setProperty ("widthPercent", s.widthPercent);
     m->setProperty ("balanceDb", s.balanceDb);
     m->setProperty ("monoLossDb", s.monoLossDb);
+    m->setProperty ("lowEndWidthPercent", s.lowEndWidthPercent);
+    m->setProperty ("lowEndCorrelation", s.lowEndCorrelation);
 
     juce::Array<juce::var> third, bandWidth, bandCorr, bandEnergy;
     for (auto v : s.thirdOctaveDb) third.add (v);
@@ -217,48 +159,14 @@ juce::String buildJsonReport (const AnalysisSnapshot& s, const ComparisonResult&
     m->setProperty ("resonances", resonances);
     root->setProperty ("metrics", juce::var (m));
 
-    juce::Array<juce::var> moves;
-    for (const auto& mv : c.eqMoves)
+    // bilanciamento tonale rispetto al target (dB per banda), se il target ha una curva
+    if (c.hasTonalTarget)
     {
-        auto* o = new juce::DynamicObject();
-        o->setProperty ("type", mv.typeName());
-        o->setProperty ("frequency", mv.frequency);
-        o->setProperty ("gainDb", mv.shownGainDb);
-        o->setProperty ("estimatedGainDb", mv.gainDb);
-        o->setProperty ("q", mv.q);
-        o->setProperty ("fixInMix", mv.fixInMix);
-        juce::Array<juce::var> bands;
-        for (int b : mv.bands) bands.add (kBandNames[(size_t) b]);
-        o->setProperty ("bands", bands);
-        moves.add (juce::var (o));
+        auto* tonal = new juce::DynamicObject();
+        for (int b = 0; b < kNumBands; ++b)
+            tonal->setProperty (kBandNames[(size_t) b], c.bandTonalDelta[(size_t) b]);
+        root->setProperty ("tonalDeltaVsTarget", juce::var (tonal));
     }
-    root->setProperty ("eqMoves", moves);
-
-    juce::Array<juce::var> findings;
-    for (const auto& f : c.findings)
-    {
-        auto* o = new juce::DynamicObject();
-        o->setProperty ("severity", severityName (f.severity));
-        o->setProperty ("category", f.category);
-        o->setProperty ("metric", f.metric);
-        o->setProperty ("value", f.value);
-        o->setProperty ("target", f.target);
-        o->setProperty ("delta", f.delta);
-        o->setProperty ("message", f.message);
-        if (f.action.isNotEmpty())
-            o->setProperty ("action", f.action);
-        if (f.hasTime())
-        {
-            o->setProperty ("timeStart", f.timeStart);
-            o->setProperty ("timeEnd", f.timeEnd);
-        }
-        o->setProperty ("stage", f.stage);
-        o->setProperty ("id", f.id);
-        if (f.ignored)
-            o->setProperty ("ignored", true);
-        findings.add (juce::var (o));
-    }
-    root->setProperty ("findings", findings);
 
     return juce::JSON::toString (juce::var (root));
 }
@@ -295,28 +203,8 @@ tbody tr:nth-child(even) { background: #f8f9fb; }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 td.tgt { color: var(--faint); font-size: 12.5px; }
 .metrics td:first-child { white-space: nowrap; }
-.summary { display: flex; gap: 30px; align-items: center; }
-.ring { width: 124px; height: 124px; border-radius: 50%; border: 10px solid var(--ok); display: flex; flex-direction: column; align-items: center; justify-content: center; flex: none; }
-.ring.warning { border-color: var(--warning); } .ring.critical { border-color: var(--critical); }
-.ring .score { font-size: 38px; font-weight: 700; line-height: 1; }
-.ring .of { font-size: 12px; color: var(--faint); }
-.areas { flex: 1; }
-.area { display: grid; grid-template-columns: 160px 1fr 48px; align-items: center; gap: 10px; margin: 4px 0; }
-.bar { height: 8px; background: var(--well); border-radius: 4px; overflow: hidden; }
-.bar > span { display: block; height: 100%; border-radius: 4px; background: var(--ok); }
-.bar > span.warning { background: var(--warning); } .bar > span.critical { background: var(--critical); }
-.counts { font-size: 13px; color: var(--dim); margin-top: 10px; }
-.counts span { margin-right: 16px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 30px; }
-.card { border: 1px solid var(--line); border-left: 4px solid var(--faint); border-radius: 6px; padding: 8px 12px; margin: 8px 0; break-inside: avoid; }
-.card.critical { border-left-color: var(--critical); } .card.warning { border-left-color: var(--warning); }
-.card.info { border-left-color: var(--info); } .card.ok { border-left-color: var(--ok); }
-.card .head { font-weight: 600; }
-.card .tgt { color: var(--faint); font-size: 12.5px; }
-.card p { margin: 4px 0 0; }
-.card .action { color: #075e92; }
-.card .when { font-size: 12px; color: var(--dim); }
 .tag { display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 1px 7px; border-radius: 9px; color: #fff; background: var(--ok); margin-right: 7px; vertical-align: 1px; }
 .tag.critical, .dot.critical { background: var(--critical); } .tag.warning, .dot.warning { background: var(--warning); }
 .tag.info, .dot.info { background: var(--info); } .dot.ok { background: var(--ok); } .dot.faint { background: var(--faint); }
@@ -329,8 +217,6 @@ td.c-critical { background: rgba(217,43,60,.13); } td.c-warning { background: rg
 .legend { font-size: 12px; color: var(--dim); }
 .legend i { display: inline-block; width: 20px; height: 0; vertical-align: middle; margin: 0 6px 0 14px; border-top: 2px solid; }
 .legend i:first-child { margin-left: 0; }
-ol.prio { padding-left: 22px; margin: 6px 0; }
-ol.prio li { margin: 7px 0; }
 .shot img { width: 100%; border: 1px solid var(--line); border-radius: 6px; }
 footer { margin-top: 34px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--faint); }
 @media print {
@@ -341,7 +227,7 @@ footer { margin-top: 34px; padding-top: 10px; border-top: 1px solid var(--line);
   .grid2 > div { break-inside: avoid; }
   td, th { padding: 3px 6px; }
   td.tgt { font-size: 10.5px; }
-  .card, tr, .area, svg, .summary { break-inside: avoid; }
+  tr, svg { break-inside: avoid; }
   .shot { break-before: page; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
@@ -371,9 +257,6 @@ footer { margin-top: 34px; padding-top: 10px; border-top: 1px solid var(--line);
         return "Nel range"_t;
     }
 
-    /** Stesse soglie dell'anello del punteggio nel pannello Report. */
-    const char* scoreClass (int score) { return score >= 85 ? "ok" : (score >= 60 ? "warning" : "critical"); }
-
     juce::String signedNum (float v, int d = 1) { return (v > 0.0f ? "+" : "") + num (v, d); }
 
     juce::String formatDate (juce::Time t) { return t.formatted ("%d/%m/%Y %H:%M"); }
@@ -392,7 +275,7 @@ footer { margin-top: 34px; padding-top: 10px; border-top: 1px solid var(--line);
     {
         juce::String h;
         h << "<footer>"
-          << escapeHtml ("Generato da %1 il %2. Valori e consigli sono indicativi: la decisione finale spetta al tuo ascolto."_t
+          << escapeHtml ("Generato da %1 il %2."_t
                              .replace ("%1", ("MasterAgent " + pluginVersion).trim()).replace ("%2", formatDate (date)))
           << "</footer>\n</div>\n</body>\n</html>\n";
         return h;
@@ -410,31 +293,6 @@ footer { margin-top: 34px; padding-top: 10px; border-top: 1px solid var(--line);
         juce::String h;
         h << "<section class=\"shot\">\n<h2>" << escapeHtml (title) << "</h2>\n<img alt=\"" << escapeHtml (title)
           << "\" src=\"data:image/png;base64," << juce::Base64::toBase64 (png.getData(), png.getSize()) << "\">\n</section>\n";
-        return h;
-    }
-
-    /** Diagnosi come scheda: gravità, misura, valore e target, spiegazione, intervento, punto del brano. */
-    juce::String findingCard (const Finding& f, bool showSeverity = true)
-    {
-        juce::String h;
-        h << "<div class=\"card " << severityClass (f.severity) << "\">\n<div class=\"head\">";
-        if (showSeverity)
-            h << "<span class=\"tag " << severityClass (f.severity) << "\">" << escapeHtml (severityLabel (f.severity)) << "</span>";
-        h << escapeHtml (f.category) << " &middot; " << escapeHtml (f.metric) << "</div>\n"
-          << "<div><span class=\"num\">" << escapeHtml (f.value) << "</span>";
-        if (f.target.isNotEmpty() && f.target != "-")   // le mosse EQ hanno come "target" le bande che correggono
-            h << " &nbsp;<span class=\"tgt\">" << (f.key.startsWith ("eq:") ? juce::String() : escapeHtml ("target"_t) + " ")
-              << escapeHtml (f.target) << "</span>";
-        h << "</div>\n";
-        if (f.message.isNotEmpty() && f.severity != Severity::ok)
-            h << "<p>" << escapeHtml (f.message) << "</p>\n";
-        if (f.action.isNotEmpty())
-            h << "<p class=\"action\">&rarr; " << escapeHtml (f.action) << "</p>\n";
-        // il punto del brano, se la spiegazione non lo cita già
-        if (f.hasTime() && ! (f.message + f.action).contains (formatSongTime (f.timeStart)))
-            h << "<p class=\"when\">" << escapeHtml ("Punto del brano: %1 - %2"_t.replace ("%1", formatSongTime (f.timeStart))
-                                                                                   .replace ("%2", formatSongTime (f.timeEnd))) << "</p>\n";
-        h << "</div>\n";
         return h;
     }
 
@@ -580,7 +438,7 @@ footer { margin-top: 34px; padding-top: 10px; border-top: 1px solid var(--line);
               << "<td class=\"num" << (r.playbackTruePeak > -1.0f ? " v-warning" : "") << "\">" << juce::String (r.playbackTruePeak, 1) << " dBTP</td></tr>\n";
         }
         h << "</tbody></table>\n<p class=\"muted\">"
-          << escapeHtml ("Guadagno negativo = la piattaforma abbasserà il brano: il loudness oltre il target non dà vantaggi e costa dinamica."_t) << "</p>\n";
+          << escapeHtml ("Guadagno negativo = la piattaforma abbasserà il brano."_t) << "</p>\n";
         return h;
     }
 }
@@ -609,40 +467,6 @@ juce::String buildHtmlReport (const ReportContext& ctx)
     if (ctx.targetDescription.isNotEmpty())
         h << "<p class=\"note\">" << escapeHtml (ctx.targetName) << ": " << escapeHtml (ctx.targetDescription) << "</p>\n";
 
-    // --- pagella ------------------------------------------------------------------------------------
-    h << "<section class=\"summary\">\n<div class=\"ring " << scoreClass (c.score) << "\"><div class=\"score\">" << c.score
-      << "</div><div class=\"of\">/ 100</div></div>\n<div class=\"areas\">\n<h3>" << escapeHtml ("Pagella"_t) << "</h3>\n";
-    for (int a = 0; a < kNumAreas; ++a)
-    {
-        const auto& area = c.areas[(size_t) a];
-        h << "<div class=\"area\"><span>" << escapeHtml (areaName ((Area) a)) << "</span><div class=\"bar\">";
-        if (area.evaluated)
-            h << "<span class=\"" << scoreClass (area.score) << "\" style=\"width:" << std::max (2, area.score) << "%\"></span></div>"
-              << "<span class=\"num v-" << scoreClass (area.score) << "\">" << area.score << "</span></div>\n";
-        else
-            h << "</div><span class=\"num muted\">n/d</span></div>\n";
-    }
-    h << "<div class=\"counts\"><span><i class=\"dot critical\"></i>" << c.count (Severity::critical) << " " << escapeHtml ("critici"_t) << "</span>"
-      << "<span><i class=\"dot warning\"></i>" << c.count (Severity::warning) << " " << escapeHtml ("da verificare"_t) << "</span>"
-      << "<span><i class=\"dot ok\"></i>" << c.count (Severity::ok) << " " << escapeHtml ("nel range"_t) << "</span>";
-    if (const int ignored = c.countIgnored(); ignored > 0)
-        h << "<span><i class=\"dot faint\"></i>" << ignored << " " << escapeHtml ("ignorate"_t) << "</span>";
-    h << "</div>\n</div>\n</section>\n";
-
-    // --- priorità -------------------------------------------------------------------------------------
-    if (! c.priorities.empty())
-    {
-        h << "<h2>" << escapeHtml ("Da fare prima, in quest'ordine"_t) << "</h2>\n<ol class=\"prio\">\n";
-        for (const auto& f : c.priorities)
-        {
-            // l'intervento concreto, a meno che ripeta il valore (mosse EQ): allora la spiegazione
-            const auto& text = f.action.isNotEmpty() && ! f.action.contains (f.value) ? f.action : f.message;
-            h << "<li><span class=\"tag " << severityClass (f.severity) << "\">" << escapeHtml (severityLabel (f.severity)) << "</span><b>"
-              << escapeHtml (f.metric) << "</b>: " << escapeHtml (f.value) << "<br>" << escapeHtml (text) << "</li>\n";
-        }
-        h << "</ol>\n";
-    }
-
     // --- confronto con la versione salvata ----------------------------------------------------------
     if (ctx.hasVersion)
     {
@@ -650,8 +474,7 @@ juce::String buildHtmlReport (const ReportContext& ctx)
         h << "<h2>" << escapeHtml ("Rispetto a %1"_t.replace ("%1", ctx.versionName)) << "</h2>\n"
           << "<p><span class=\"v-ok\">&#9650; " << vc.improved << " " << escapeHtml ("migliorate"_t) << "</span> &nbsp; "
           << "<span class=\"" << (vc.worsened > 0 ? "v-critical" : "muted") << "\">&#9660; " << vc.worsened << " " << escapeHtml ("peggiorate"_t) << "</span> &nbsp; "
-          << "<span class=\"muted\">" << vc.unchanged << " " << escapeHtml ("invariate"_t) << "</span> &nbsp; &middot; &nbsp; "
-          << escapeHtml ("Punteggio"_t) << " " << vc.scoreBefore << " &rarr; <b>" << vc.scoreNow << "</b></p>\n";
+          << "<span class=\"muted\">" << vc.unchanged << " " << escapeHtml ("invariate"_t) << "</span></p>\n";
         if (vc.changes.empty())
         {
             h << "<p class=\"muted\">" << escapeHtml ("Nessuna differenza rilevante rispetto alla versione salvata."_t) << "</p>\n";
@@ -746,68 +569,13 @@ juce::String buildHtmlReport (const ReportContext& ctx)
     }
     h << "</tbody></table>\n";
 
-    // --- mosse EQ -----------------------------------------------------------------------------------------
-    if (! c.eqMoves.empty())
-    {
-        h << "<h2>" << escapeHtml ("Mosse EQ suggerite"_t) << "</h2>\n<table>\n<thead><tr><th>#</th><th>" << escapeHtml ("Mossa"_t)
-          << "</th><th class=\"num\">" << escapeHtml ("Stimato"_t) << "</th><th>" << escapeHtml ("Corregge"_t) << "</th></tr></thead>\n<tbody>\n";
-        for (size_t i = 0; i < c.eqMoves.size(); ++i)
-        {
-            const auto& m = c.eqMoves[i];
-            juce::StringArray bands;
-            for (int b : m.bands)
-                bands.add (kBandNames[(size_t) b]);
-            h << "<tr><td>" << (int) (i + 1) << "</td><td><b>" << escapeHtml (m.describe (m.shownGainDb)) << "</b>"
-              << (m.fixInMix ? " <span class=\"muted\">" + escapeHtml ("(il resto va sistemato nel mix)"_t) + "</span>" : juce::String())
-              << "</td><td class=\"num\">" << signedNum (m.gainDb) << " dB</td><td>" << escapeHtml (bands.joinIntoString (", ")) << "</td></tr>\n";
-        }
-        h << "</tbody></table>\n<p class=\"muted\">"
-          << escapeHtml ("Il guadagno indicato è quello da usare; \"stimato\" è lo scostamento misurato, spesso da correggere in parte nel mix."_t) << "</p>\n";
-    }
-
-    // --- diagnosi -----------------------------------------------------------------------------------------
-    h << "<h2>" << escapeHtml ("Diagnosi"_t) << "</h2>\n";
-    int problems = 0;
-    for (const auto& f : c.findings)
-        if (! f.ignored && f.severity != Severity::ok)
-        {
-            h << findingCard (f);
-            ++problems;
-        }
-    if (problems == 0)
-        h << "<p class=\"muted\">" << escapeHtml ("Nessun problema: tutte le misure sono nel range del target."_t) << "</p>\n";
-
-    auto findingTable = [&h] (const juce::String& title, const std::vector<const Finding*>& list)
-    {
-        if (list.empty())
-            return;
-        h << "<h2>" << escapeHtml (title) << " (" << (int) list.size() << ")</h2>\n<table>\n<thead><tr><th>" << escapeHtml ("Area"_t) << "</th><th>"
-          << escapeHtml ("Misura"_t) << "</th><th class=\"num\">" << escapeHtml ("Valore"_t) << "</th><th>" << escapeHtml ("Target"_t)
-          << "</th></tr></thead>\n<tbody>\n";
-        for (const auto* f : list)
-            h << "<tr><td class=\"muted\">" << escapeHtml (f->area != Area::none ? areaName (f->area) : f->category) << "</td><td>" << escapeHtml (f->metric) << "</td><td class=\"num\">"
-              << escapeHtml (f->value) << "</td><td class=\"tgt\">" << escapeHtml (f->target != "-" ? f->target : juce::String()) << "</td></tr>\n";
-        h << "</tbody></table>\n";
-    };
-
-    std::vector<const Finding*> inRange, ignored;
-    for (const auto& f : c.findings)
-    {
-        if (f.ignored)
-            ignored.push_back (&f);
-        else if (f.severity == Severity::ok)
-            inRange.push_back (&f);
-    }
-    findingTable ("Nel range"_t, inRange);
-    findingTable ("Ignorate (scelte volute)"_t, ignored);
-
     h << streamingSection (ctx);
     h << screenshotSection (ctx.screenshotPng, "Dashboard"_t);
     h << htmlEnd (ctx.pluginVersion, ctx.date);
     return h;
 }
 
-juce::String buildAlbumHtmlReport (const AlbumResult& album, const juce::String& pluginVersion, const juce::MemoryBlock& screenshotPng, juce::Time date)
+juce::String buildAlbumHtmlReport (const AlbumResult& album, const juce::String& pluginVersion, juce::Time date)
 {
     juce::String h = htmlBegin ("MasterAgent - " + "Coerenza album"_t);
 
@@ -858,24 +626,6 @@ juce::String buildAlbumHtmlReport (const AlbumResult& album, const juce::String&
     h << "</tbody></table>\n<p class=\"muted\">"
       << escapeHtml ("Delta e bande: scostamento rispetto alla mediana dell'album; celle colorate = fuori tolleranza rispetto all'album."_t) << "</p>\n";
 
-    // diagnosi per brano
-    h << "<h2>" << escapeHtml ("Diagnosi per brano"_t) << "</h2>\n";
-    bool any = false;
-    for (size_t i = 0; i < album.tracks.size(); ++i)
-    {
-        const auto& tr = album.tracks[i];
-        if (tr.findings.empty())
-            continue;
-        any = true;
-        h << "<h3>" << (int) i + 1 << ". " << escapeHtml (tr.name) << "</h3>\n";
-        for (const auto& f : tr.findings)
-            h << findingCard (f);
-    }
-    if (! any)
-        h << "<p class=\"muted\">"
-          << escapeHtml ("Nessun brano fuori dall'album: loudness della sezione più forte e bilanciamento tonale sono coerenti."_t) << "</p>\n";
-
-    h << screenshotSection (screenshotPng, "Vista album"_t);
     h << htmlEnd (pluginVersion, date);
     return h;
 }

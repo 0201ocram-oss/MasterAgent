@@ -80,8 +80,10 @@ private:
     void showScreen (Screen newScreen);
     void startTrackAnalysis (const juce::File& file);
     void updateWaveform();
+    void updatePlayback();
     ma::MarkerSettings currentMarkerSettings() const;
-    void resetIgnoredMarkers();
+    /** Nuovo brano nella dashboard: segni ignorati e valori dell'ascolto ripartono da zero. */
+    void resetTrackView();
     void togglePlayback();
 
     // brano da analizzare e versioni
@@ -105,10 +107,14 @@ private:
     void askProfileName (std::vector<ma::AnalysisSnapshot> snapshots, const juce::StringArray& names, const juce::StringArray& skipped);
 
     // coerenza album
-    void chooseAlbumFiles();
-    void startAlbumCheck (const juce::Array<juce::File>& files);
+    /** newAlbum: i file scelti sostituiscono l'album; altrimenti si aggiungono. */
+    void chooseAlbumFiles (bool newAlbum);
+    void addAlbumFiles (const juce::Array<juce::File>& files, bool newAlbum);
     void updateAlbumView();
     void exportAlbum();
+
+    /** Immagine dei pannelli di misura (senza report e barra in alto), per gli export. */
+    juce::Image createMeasurementsImage();
 
     std::array<ma::ui::Panel*, 7> allPanels();
 
@@ -137,6 +143,7 @@ private:
     bool markersDirty = true;
     std::set<juce::String> ignoredMarkerIds;                  // non salvati: valgono finché il brano resta aperto
     std::array<bool, ma::kNumMarkerTypes> ignoredMarkerTypes {};
+    bool playbackHeard = false;                               // il brano aperto è stato ascoltato
 
     ma::ui::DashboardData data;
     ma::TargetProfile referenceProfile;

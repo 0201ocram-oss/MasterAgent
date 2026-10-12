@@ -65,6 +65,7 @@ public:
     std::function<void (bool)> onListenChanged, onLiveModeChanged, onMixPhaseChanged, onHelpModeChanged;
 
     juce::Component& getOptionsButton() noexcept { return optionsButton; }
+    juce::Component& getExportButton() noexcept  { return exportButton; }
 
 private:
     void applyColours();

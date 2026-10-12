@@ -42,8 +42,9 @@ void LoudnessPanel::setData (const DashboardData& d)
     const bool live = d.master.liveMode;
     if (d.masterFromFile)
     {
-        badge = "FILE";
-        badgeColour = colours::accent2;
+        // in ascolto: momentary, short-term e i meter seguono la riproduzione
+        badge = d.playing ? "LIVE" : "FILE";
+        badgeColour = d.playing ? colours::warning : colours::accent2;
     }
     else
     {
@@ -94,9 +95,9 @@ void LoudnessPanel::paintContent (juce::Graphics& g, juce::Rectangle<float> area
     auto cell = [&] (int c, int r) { return juce::Rectangle<float> (top.getX() + c * cw, top.getY() + r * rh, cw, rh); };
 
     addHelp (cell (0, 0).withHeight (38.0f), "shortTerm");
-    drawSmall (g, cell (0, 0), "Short-term (LUFS)", formatDb (s.shortTermLufs));
+    drawSmall (g, cell (0, 0), "Short-term (LUFS)", formatDb (d.instant().shortTermLufs));
     addHelp (cell (1, 0).withHeight (38.0f), "momentary");
-    drawSmall (g, cell (1, 0), "Momentary (LUFS)", formatDb (s.momentaryLufs));
+    drawSmall (g, cell (1, 0), "Momentary (LUFS)", formatDb (d.instant().momentaryLufs));
 
     auto lraCell = cell (2, 0);
     markHighlight (g, lraCell.withHeight (38.0f).withTrimmedRight (6.0f), highlight::lra);
@@ -223,6 +224,18 @@ void LoudnessPanel::drawHistory (juce::Graphics& g, juce::Rectangle<float> r)
         const float dashes[] = { 4.0f, 3.0f };
         g.drawDashedLine ({ r.getX(), y, r.getRight(), y }, dashes, 2, 1.0f);
     }
+
+    // brano da file: punto in ascolto
+    if (d.masterFromFile && d.playbackSeconds >= 0.0 && d.master.historyAligned)
+    {
+        const double index = (d.playbackSeconds - d.master.historyStartSongSec) / 0.1;
+        if (index >= 0.0 && index <= (double) (span - 1))
+        {
+            const float x = r.getX() + r.getWidth() * (float) (index / (double) (span - 1));
+            g.setColour (colours::text.withAlpha (d.playing ? 0.85f : 0.45f));
+            g.fillRect (x - 0.75f, r.getY(), 1.5f, r.getHeight());
+        }
+    }
 }
 
 //==============================================================================
@@ -244,7 +257,7 @@ void PeakPanel::paintContent (juce::Graphics& g, juce::Rectangle<float> area)
         auto m = meterArea.removeFromLeft (22.0f).reduced (3.0f, 0.0f);
         fillWell (g, m, 3.0f);
 
-        const float tp = s.truePeakDb[(size_t) ch];
+        const float tp = d.instant().truePeakDb[(size_t) ch];   // in ascolto: picco degli ultimi secondi
         auto bar = m.reduced (2.0f).withTop (yFor (m.reduced (2.0f), tp));
         juce::ColourGradient grad (colours::critical, 0.0f, yFor (m, 1.0f), colours::ok, 0.0f, yFor (m, -18.0f), false);
         grad.addColour (0.25, colours::warning);
@@ -296,7 +309,7 @@ void PeakPanel::paintContent (juce::Graphics& g, juce::Rectangle<float> area)
 
     area.removeFromTop (4.0f);
     row ("Sample peak L / R", formatDb (s.samplePeakDb[0], 2) + " / " + formatDb (s.samplePeakDb[1], 2) + " dBFS", colours::text, "samplePeak");
-    row ("TP recente (3 s)", formatDb (s.recentTruePeakDb, 2) + " dBTP", colours::text, "recentTp");
+    row ("TP recente (3 s)", formatDb (d.instant().recentTruePeakDb, 2) + " dBTP", colours::text, "recentTp");
     row ("Eventi > -1 dBTP", juce::String (s.overs1dB), s.overs1dB > 0 ? colours::warning : colours::ok, "overs1");
     row ("Eventi > 0 dBTP", juce::String (s.overs0dB), s.overs0dB > 0 ? colours::critical : colours::ok, highlight::overs);
     row ("Clip (fondo scala)", juce::String (s.clipEvents) + " (" + juce::String (s.clipEventsFullScale) + ")",
@@ -336,7 +349,7 @@ void DynamicsPanel::paintContent (juce::Graphics& g, juce::Rectangle<float> area
     };
 
     area.removeFromTop (4.0f);
-    row ("PSR attuale", juce::String (s.psr, 1) + " dB", colours::text, {}, "psrNow");
+    row ("PSR attuale", juce::String (d.instant().psr, 1) + " dB", colours::text, {}, "psrNow");
     row ("Crest factor", juce::String (s.crestDb, 1) + " dB", colours::text, ref (d.reference.crestDb), "crestFactor");
     row ("RMS", formatDb (s.rmsDb) + " dBFS", colours::text, ref (d.reference.rmsDb), "rms");
     for (int b = 0; b < kNumCrestBands; ++b)

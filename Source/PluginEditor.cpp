@@ -66,18 +66,29 @@ MasterAgentEditor::MasterAgentEditor (MasterAgentProcessor& p)
         processor.clearAlbum();
         showScreen (Screen::start);
     };
+    albumView.onStop = [this]
+    {
+        processor.stopAlbumAnalysis();
+        updateAlbumView();
+    };
     albumView.onExport = [this] { exportAlbum(); };
+    albumView.onAddTracks = [this] { chooseAlbumFiles (false); };
+    albumView.onRemoveTrack = [this] (int index)
+    {
+        processor.removeAlbumTrack (index);
+        updateAlbumView();
+    };
     albumView.onShowTrack = [this] (int index)
     {
         processor.useAlbumTrackAsMaster (index);
-        resetIgnoredMarkers();
+        resetTrackView();
         showScreen (Screen::track);
         updateComparison();
         pushDataToPanels();
     };
 
     startView.onAnalyseTrack = [this] { chooseMasterFile(); };
-    startView.onCompareAlbum = [this] { chooseAlbumFiles(); };
+    startView.onCompareAlbum = [this] { chooseAlbumFiles (true); };
     startView.onShowAlbum = [this] { showScreen (Screen::album); };
 
     waveformPanel.onSeek = [this] (double seconds) { processor.getPlayer().setPosition (seconds); };
@@ -341,8 +352,9 @@ void MasterAgentEditor::paintDragOverlay (juce::Graphics& g)
     g.setColour (colours::reference);
     g.drawRoundedRectangle (bounds.toFloat().reduced (6.0f), 12.0f, 2.0f);
     g.setFont (fonts::value (24.0f));
-    g.drawText (standalone ? (screen == Screen::start ? "Rilascia i file: uno da analizzare, più file per confrontarli come album"_t
-                                                      : "Rilascia i file: uno da analizzare o come reference, più file per l'album o un profilo"_t)
+    g.drawText (standalone ? (screen == Screen::start   ? "Rilascia i file: uno da analizzare, più file per confrontarli come album"_t
+                              : screen == Screen::album ? "Rilascia i file per aggiungerli all'album"_t
+                                                        : "Rilascia i file: uno da analizzare o come reference, più file per l'album o un profilo"_t)
                            : "Rilascia i file: uno come reference, più file per creare un profilo"_t,
                 bounds, juce::Justification::centred);
 }
@@ -595,7 +607,7 @@ void MasterAgentEditor::updateComparison()
         CompareOptions options;
         options.phase = data.phase;
         options.tonalBasis = processor.tonalLoudestSection.load() ? TonalBasis::loudestSection : TonalBasis::automatic;
-        options.fifoOverflow = processor.getLiveAnalysis().hasOverflowed();
+        options.fifoOverflow = ! standalone && processor.getLiveAnalysis().hasOverflowed();
         options.reference = data.hasReference ? &data.reference : nullptr;
         options.ignoredIds = processor.getIgnoredFindings();
 
@@ -649,6 +661,7 @@ void MasterAgentEditor::timerCallback()
             data.master = {};
         data.masterFileName = processor.getMasterFile().getFileName();
         updateWaveform();
+        updatePlayback();
     }
     else
     {
@@ -704,30 +717,17 @@ void MasterAgentEditor::timerCallback()
 void MasterAgentEditor::updateAlbumView()
 {
     processor.updateAlbum();
-    const auto state = processor.getAlbumState();
 
     if (const int revision = processor.getAlbumRevision(); revision != seenAlbumRevision)
     {
         seenAlbumRevision = revision;
-        if (state == MasterAgentProcessor::AlbumState::ready)
-        {
-            const auto album = processor.getAlbum();
-            albumView.setAlbum (checkAlbum (album.snapshots, album.names), album.skipped);
-        }
-        else
-        {
-            albumView.setAlbum ({}, {});
-        }
-
-        const bool available = state != MasterAgentProcessor::AlbumState::none;
-        header.setAlbumAvailable (available, screen == Screen::album);
-        startView.setAlbumAvailable (state == MasterAgentProcessor::AlbumState::ready, (int) processor.getAlbum().snapshots.size());
-        if (! available && screen == Screen::album)
-            showScreen (Screen::start);
+        const auto album = processor.getAlbum();
+        albumView.setAlbum (checkAlbum (album.snapshots, album.names), album.skipped);
+        header.setAlbumAvailable (processor.getAlbumState() != MasterAgentProcessor::AlbumState::none, screen == Screen::album);
+        startView.setAlbumAvailable (! album.snapshots.empty(), (int) album.snapshots.size());
     }
 
-    if (state == MasterAgentProcessor::AlbumState::analysing)
-        albumView.setProgress (true, processor.getAlbumStatusText(), processor.getAlbumProgress());
+    albumView.setPending (processor.getAlbumPending(), processor.getAlbumProgress());
 }
 
 void MasterAgentEditor::showScreen (Screen newScreen)
@@ -758,15 +758,20 @@ void MasterAgentEditor::showScreen (Screen newScreen)
 void MasterAgentEditor::startTrackAnalysis (const juce::File& file)
 {
     processor.analyseMasterFile (file);
-    resetIgnoredMarkers();
+    resetTrackView();
     showScreen (Screen::track);
 }
 
-void MasterAgentEditor::resetIgnoredMarkers()
+void MasterAgentEditor::resetTrackView()
 {
     ignoredMarkerIds.clear();
     ignoredMarkerTypes.fill (false);
     waveformPanel.setIgnored (ignoredMarkerIds, ignoredMarkerTypes);
+
+    // i valori dell'ascolto del brano precedente non valgono più
+    playbackHeard = false;
+    data.playbackLive = false;
+    processor.resetAnalysis();
 }
 
 void MasterAgentEditor::togglePlayback()
@@ -836,42 +841,52 @@ void MasterAgentEditor::updateWaveform()
     waveformPanel.setPlayback (player.getPosition(), player.isPlaying());
 }
 
-void MasterAgentEditor::chooseAlbumFiles()
+void MasterAgentEditor::updatePlayback()
 {
-    fileChooser = std::make_unique<juce::FileChooser> ("Scegli i brani dell'album (da 2 a 30)"_t,
-                                                       processor.getMasterFile().getParentDirectory(),
+    // in ascolto i valori istantanei (momentary, short-term, picchi recenti, spettro, correlazione, goniometro)
+    // seguono la riproduzione; in pausa restano gli ultimi ascoltati
+    const auto& player = processor.getPlayer();
+    data.playing = data.masterFromFile && player.isPlaying();
+    playbackHeard = playbackHeard || data.playing;
+    data.playbackLive = data.masterFromFile && playbackHeard;
+    data.playbackSeconds = data.masterFromFile ? player.getPosition() : -1.0;
+    if (data.playbackLive)
+        processor.getLiveAnalysis().getSnapshot (data.playback);
+}
+
+void MasterAgentEditor::chooseAlbumFiles (bool newAlbum)
+{
+    const auto current = processor.getAlbum();
+    const auto folder = ! current.files.isEmpty() ? current.files.getLast().getParentDirectory()
+                                                  : processor.getMasterFile().getParentDirectory();
+    fileChooser = std::make_unique<juce::FileChooser> ("Scegli uno o più brani dell'album"_t, folder,
                                                        "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
     fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
                                   | juce::FileBrowserComponent::canSelectMultipleItems,
-                              [this] (const juce::FileChooser& fc)
+                              [this, newAlbum] (const juce::FileChooser& fc)
                               {
                                   const auto files = fc.getResults();
                                   if (! files.isEmpty())
-                                      startAlbumCheck (files);
+                                      addAlbumFiles (files, newAlbum);
                               });
 }
 
-void MasterAgentEditor::startAlbumCheck (const juce::Array<juce::File>& files)
+void MasterAgentEditor::addAlbumFiles (const juce::Array<juce::File>& files, bool newAlbum)
 {
-    if (files.size() < 2)
-    {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Coerenza album"_t,
-            "Seleziona almeno 2 brani: ognuno viene confrontato con il resto dell'album."_t);
-        return;
-    }
-
-    // l'ordine di scelta del selettore non è affidabile: la tabella segue il nome del file (01_, 02_, ...)
+    // l'ordine di scelta del selettore non è affidabile: i file scelti insieme seguono il nome (01_, 02_, ...)
     auto sorted = files;
     std::sort (sorted.begin(), sorted.end(), [] (const juce::File& a, const juce::File& b)
     {
         return a.getFileName().compareNatural (b.getFileName()) < 0;
     });
 
-    if (sorted.size() > album::maxTracks)
+    if (newAlbum)
+        processor.clearAlbum();
+    const int added = processor.addAlbumTracks (sorted);
+    if (added < sorted.size() && processor.getAlbumSize() >= album::maxTracks)
         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Coerenza album"_t,
-            "Verranno analizzati i primi %d brani."_t.replace ("%d", juce::String (album::maxTracks)));
+            "Al massimo %d brani per album: gli altri file non sono stati aggiunti."_t.replace ("%d", juce::String (album::maxTracks)));
 
-    processor.startAlbumCheck (sorted);
     updateAlbumView();
     showScreen (Screen::album);
 }
@@ -889,6 +904,20 @@ namespace
     }
 }
 
+juce::Image MasterAgentEditor::createMeasurementsImage()
+{
+    juce::Rectangle<int> area;
+    for (auto* panel : allPanels())
+        if (panel != &reportPanel && panel->isVisible())
+            area = area.isEmpty() ? panel->getBounds() : area.getUnion (panel->getBounds());
+    if (waveformPanel.isVisible())
+        area = area.getUnion (waveformPanel.getBounds());
+
+    if (area.isEmpty())
+        return {};
+    return content.createComponentSnapshot (area.expanded (12).getIntersection (content.getLocalBounds()), true, 1.0f);
+}
+
 void MasterAgentEditor::exportAlbum()
 {
     enum { textReport = 1, csv, png, html };
@@ -896,9 +925,11 @@ void MasterAgentEditor::exportAlbum()
     menu.addItem (html, "Report HTML (.html), stampabile in PDF"_t);
     menu.addItem (textReport, "Report testuale (.txt)"_t);
     menu.addItem (csv, "Tabella per foglio di calcolo (.csv)"_t);
-    menu.addItem (png, "Immagine del pannello (.png)"_t);
+    menu.addItem (png, "Immagine della tabella (.png)"_t);
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (albumView), [this] (int choice)
+    // tendina sotto il pulsante Esporta
+    auto& button = albumView.getExportButton();
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&button).withMinimumWidth (button.getWidth()), [this] (int choice)
     {
         if (choice == 0)
             return;
@@ -908,14 +939,13 @@ void MasterAgentEditor::exportAlbum()
         if (! result.isValid())
             return;
 
-        const auto panelImage = choice == png || choice == html ? albumView.createComponentSnapshot (albumView.getLocalBounds(), true, 1.0f)
-                                                                : juce::Image();
+        // solo i dati dei brani: niente diagnosi né consigli (l'immagine è la sola tabella)
         const juce::String ext = choice == textReport ? ".txt" : (choice == csv ? ".csv" : (choice == png ? ".png" : ".html"));
         const auto text = choice == textReport ? buildAlbumTextReport (result)
                         : choice == csv ? buildAlbumCsv (result)
-                        : choice == html ? buildAlbumHtmlReport (result, JucePlugin_VersionString, encodePng (panelImage))
+                        : choice == html ? buildAlbumHtmlReport (result, JucePlugin_VersionString)
                         : juce::String();
-        const auto image = choice == png ? panelImage : juce::Image();
+        const auto image = choice == png ? albumView.createTableImage() : juce::Image();
         const bool openAfter = choice == html;
         const auto folder = album.files.isEmpty() ? juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
                                                   : album.files.getFirst().getParentDirectory();
@@ -1013,9 +1043,14 @@ void MasterAgentEditor::showOptionsMenu()
     if (standalone)
     {
         menu.addSectionHeader ("Album"_t);
-        menu.addItem ("Controlla coerenza album..."_t, [this] { chooseAlbumFiles(); });
-        if (processor.getAlbumState() != MasterAgentProcessor::AlbumState::none && screen != Screen::album)
-            menu.addItem ("Mostra coerenza album"_t, [this] { showScreen (Screen::album); });
+        menu.addItem ("Nuovo album..."_t, [this] { chooseAlbumFiles (true); });
+        if (processor.getAlbumState() != MasterAgentProcessor::AlbumState::none)
+        {
+            menu.addItem ("Aggiungi brani all'album..."_t, processor.getAlbumSize() < album::maxTracks, false,
+                          [this] { chooseAlbumFiles (false); });
+            if (screen != Screen::album)
+                menu.addItem ("Mostra coerenza album"_t, [this] { showScreen (Screen::album); });
+        }
     }
 
     menu.addSeparator();
@@ -1108,11 +1143,19 @@ void MasterAgentEditor::filesDropped (const juce::StringArray& files, juce::Poin
         if (dropped.size() == 1)
             startTrackAnalysis (dropped[0]);
         else
-            startAlbumCheck (dropped);
+            addAlbumFiles (dropped, true);
+        return;
+    }
+
+    // album aperto: i file entrano nell'album
+    if (standalone && screen == Screen::album)
+    {
+        addAlbumFiles (dropped, false);
         return;
     }
 
     // un file: brano da analizzare (standalone) o reference; più file: album (standalone) o profilo
+    const bool hasAlbum = standalone && processor.getAlbumState() != MasterAgentProcessor::AlbumState::none;
     juce::PopupMenu menu;
     if (dropped.size() == 1)
     {
@@ -1120,12 +1163,16 @@ void MasterAgentEditor::filesDropped (const juce::StringArray& files, juce::Poin
         if (standalone)
             menu.addItem ("Analizza questo brano"_t, [this, file = dropped[0]] { startTrackAnalysis (file); });
         menu.addItem ("Usa come brano di riferimento"_t, [this, file = dropped[0]] { processor.loadReference (file); });
+        if (hasAlbum)
+            menu.addItem ("Aggiungi all'album"_t, [this, dropped] { addAlbumFiles (dropped, false); });
     }
     else
     {
         menu.addSectionHeader (juce::String (dropped.size()) + " " + "file"_t);
         if (standalone)
-            menu.addItem ("Controlla la coerenza dell'album"_t, [this, dropped] { startAlbumCheck (dropped); });
+            menu.addItem ("Nuovo album con questi brani"_t, [this, dropped] { addAlbumFiles (dropped, true); });
+        if (hasAlbum)
+            menu.addItem ("Aggiungi all'album"_t, [this, dropped] { addAlbumFiles (dropped, false); });
         menu.addItem ("Crea un profilo da questi brani"_t, profileJob.getState() != BatchAnalysisJob::State::running, false,
                       [this, dropped] { startProfileJob (dropped); });
     }
@@ -1349,9 +1396,11 @@ void MasterAgentEditor::exportReport()
     menu.addItem (html, "Report HTML (.html), stampabile in PDF"_t);
     menu.addItem (text, "Report testuale (.txt)");
     menu.addItem (json, "Dati completi (.json)");
-    menu.addItem (png, "Screenshot dashboard (.png)");
+    menu.addItem (png, "Immagine delle misure (.png)"_t);
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (header), [this] (int choice)
+    // tendina sotto il pulsante Esporta
+    auto& button = header.getExportButton();
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&button).withMinimumWidth (button.getWidth()), [this] (int choice)
     {
         if (choice == 0)
             return;
@@ -1380,7 +1429,8 @@ void MasterAgentEditor::exportReport()
         report->versionName = data.versionName;
         report->versionComparison = data.versionComparison;
 
-        const auto image = choice == png || choice == html ? content.createComponentSnapshot (content.getLocalBounds(), true, 1.0f) : juce::Image();
+        // solo le misure: il pannello report (consigli) e la barra dei comandi restano fuori
+        const auto image = choice == png || choice == html ? createMeasurementsImage() : juce::Image();
         if (choice == html)
             report->screenshotPng = encodePng (image);
 

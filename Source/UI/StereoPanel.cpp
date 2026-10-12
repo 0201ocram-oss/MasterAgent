@@ -23,8 +23,9 @@ void StereoPanel::paintContent (juce::Graphics& g, juce::Rectangle<float> area)
     g.setColour (colours::textDim);
     g.drawText ("Correlazione (istantanea / media)", corrBlock.removeFromTop (15.0f), juce::Justification::centredLeft);
     auto bar = corrBlock.removeFromTop (10.0f);
-    const auto corrCol = s.correlationInstant < 0.0f ? colours::critical : (s.correlationInstant < 0.3f ? colours::warning : colours::ok);
-    drawHBar (g, bar, s.correlationInstant, -1.0f, 1.0f, corrCol, true);
+    const float corrNow = d.instant().correlationInstant;   // in ascolto: la correlazione di ciò che si sente
+    const auto corrCol = corrNow < 0.0f ? colours::critical : (corrNow < 0.3f ? colours::warning : colours::ok);
+    drawHBar (g, bar, corrNow, -1.0f, 1.0f, corrCol, true);
     {
         auto marker = [&] (float value, juce::Colour c)
         {
@@ -110,7 +111,7 @@ void StereoPanel::paintContent (juce::Graphics& g, juce::Rectangle<float> area)
 
 void StereoPanel::drawGoniometer (juce::Graphics& g, juce::Rectangle<float> r)
 {
-    const auto& s = data->master;
+    const auto& s = data->instant();
     r = r.reduced (2.0f);
     fillWell (g, r, 8.0f);
 

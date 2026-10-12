@@ -72,12 +72,13 @@ struct AlbumResult
     - Bilanciamento tonale per banda rispetto alla curva mediana dell'album (sezione più forte, se c'è in tutti i brani).
     - Ceiling true peak e larghezza stereo diversi dagli altri brani: informativi.
     La mediana, al contrario della media, non si sposta per un solo brano fuori posto, che così risulta segnalato da solo.
-    Servono almeno 2 brani; names è nello stesso ordine degli snapshot.
+    Il confronto vale da 2 brani in su (isValid); con un solo brano il risultato ha la sua riga, senza scarti.
+    names è nello stesso ordine degli snapshot.
 */
 AlbumResult checkAlbum (const std::vector<AnalysisSnapshot>& snapshots, const juce::StringArray& names);
 
-/** Report testuale dell'album (tabella e diagnosi per brano). */
-juce::String buildAlbumTextReport (const AlbumResult& album);
+/** Report testuale dell'album: i dati dei brani e, con withDiagnoses, le diagnosi con i consigli per brano. */
+juce::String buildAlbumTextReport (const AlbumResult& album, bool withDiagnoses = false);
 
 /** Tabella CSV (separatore ";", decimali con il punto): un brano per riga. */
 juce::String buildAlbumCsv (const AlbumResult& album);

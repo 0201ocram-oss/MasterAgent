@@ -10,6 +10,7 @@
 namespace ma
 {
 
+/** Export del brano: solo le misure (con lo scarto tonale dal target), senza punteggio né consigli. */
 juce::String buildTextReport (const AnalysisSnapshot& s, const ComparisonResult& c, const juce::String& targetName);
 juce::String buildJsonReport (const AnalysisSnapshot& s, const ComparisonResult& c, const juce::String& targetName);
 
@@ -28,19 +29,19 @@ struct ReportContext
     juce::String versionName;
     VersionComparison versionComparison;
 
-    juce::MemoryBlock screenshotPng;     // PNG della dashboard, vuoto = senza immagine
+    juce::MemoryBlock screenshotPng;     // PNG dei pannelli di misura, vuoto = senza immagine
 };
 
 /**
     Report in un unico file HTML: CSS chiaro e indipendente dal tema, pronto per la stampa in PDF dal browser.
-    Pagella, priorità, misure, bilanciamento tonale con grafico SVG, mosse EQ, diagnosi, anteprima streaming,
-    confronto con la versione salvata e screenshot della dashboard (PNG incorporato in base64).
+    Solo i dati del master, senza consigli: misure con i valori del target, bilanciamento tonale con grafico SVG,
+    anteprima streaming, confronto con la versione salvata e immagine delle misure (PNG incorporato in base64).
 */
 juce::String buildHtmlReport (const ReportContext& context);
 
-/** Coerenza album in HTML: riepilogo, tabella dei brani con le celle colorate e diagnosi per brano. */
+/** Coerenza album in HTML, solo dati: riepilogo e tabella dei brani con le celle colorate. */
 juce::String buildAlbumHtmlReport (const AlbumResult& album, const juce::String& pluginVersion,
-                                   const juce::MemoryBlock& screenshotPng = {}, juce::Time date = juce::Time::getCurrentTime());
+                                   juce::Time date = juce::Time::getCurrentTime());
 
 /** Testo sicuro dentro l'HTML: & < > " diventano entità. */
 juce::String escapeHtml (const juce::String& text);

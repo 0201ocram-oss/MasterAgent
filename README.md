@@ -17,16 +17,16 @@ Due modi di usarlo:
 2. Con *Auto-reset al play* attivo, avvia la riproduzione **dall'inizio del brano** e lasciala andare **fino alla fine**. Integrated, LRA, DR e PSR minimo sono affidabili solo sul brano intero.
 3. Leggi il pannello **Report**. Le diagnosi sono ordinate per gravità (rosso = critico, giallo = da verificare) e ognuna ha un suggerimento su cosa intervenire.
 4. Correggi con i tuoi plugin, premi **Reset** e riproduci di nuovo.
-5. Con **Esporta report** salvi il report in HTML, TXT o JSON, oppure lo screenshot della dashboard in PNG.
+5. Con **Esporta** (si apre una tendina sotto il pulsante) salvi i dati del master in HTML, TXT o JSON, oppure l'immagine dei pannelli di misura in PNG. L'export contiene solo le misure: punteggio, priorità, mosse EQ e consigli restano nel plugin.
 
 ### Report HTML
 *Esporta → Report HTML* crea un unico file che si apre da solo nel browser. Da lì si stampa in PDF (Ctrl+P → Salva come PDF): lo stile è chiaro e pensato per la stampa A4, qualunque sia il tema dell'interfaccia. Contiene:
 - intestazione con brano, target, fase, data e versione del plugin;
-- pagella per area e priorità, nell'ordine in cui affrontarle;
-- tabelle di loudness, picchi, dinamica e stereo, con i valori fuori range colorati come nella dashboard e il target accanto;
+- tabelle di loudness, picchi, dinamica e stereo, con i valori fuori range colorati come nella dashboard e il range del target accanto;
 - bilanciamento tonale: grafico dei terzi d'ottava (master, target tratteggiato, fascia di tolleranza di ogni banda) e tabella per banda;
-- mosse EQ, tutte le diagnosi con spiegazione e intervento, le misure nel range e quelle ignorate;
-- confronto con la versione salvata (se attivo), anteprima streaming e screenshot della dashboard.
+- confronto con la versione salvata (se attivo), anteprima streaming e immagine dei pannelli di misura.
+
+Niente pagella, priorità, mosse EQ né diagnosi con i consigli: il report è la scheda dei dati del master.
 
 Dall'app standalone il report di un file nasce nella stessa cartella del file. Anche la coerenza album ha il suo report HTML (*Esporta* nella vista album). Dalla riga di comando: `MasterAgentAnalyze --html report.html brano.wav` (per l'album: `MA_HTML=album.html MasterAgentAnalyze --album ...`).
 
@@ -74,6 +74,8 @@ Avvia `MasterAgent.exe` e scegli **Analizza un brano** (oppure trascina il file 
 
 Clic sulla forma d'onda per ascoltare da quel punto (barra spaziatrice = play/pausa; l'uscita si sceglie in *Options* in alto a sinistra). Clic su un segno per ascoltarlo da 2 secondi prima, per **ignorarlo** (es. un clipper voluto) o per ignorare tutti i segni dello stesso tipo; lo stesso si fa cliccando una voce della legenda. I segni ignorati restano in grigio e valgono finché il brano resta aperto (non vengono salvati). Le soglie seguono il target attivo e la fase Mix/Master. **Nuova analisi** torna alla schermata iniziale.
 
+Mentre ascolti, la dashboard va **dal vivo** (badge *LIVE* sul pannello Loudness): momentary, short-term, meter dei picchi (ultimi secondi), TP recente, PSR attuale, spettro istantaneo, correlazione e goniometro seguono ciò che senti, e una linea nella cronologia della loudness segna il punto in ascolto. Integrated, LRA, true peak max, PLR, DR, tonale e report restano quelli dell'analisi del file intero. In pausa i valori dal vivo restano fermi sull'ultimo punto ascoltato.
+
 ### Versioni del master
 Per sapere se una correzione ha davvero migliorato il master:
 1. Premi **Salva versione** nel Report: l'analisi attuale diventa una versione (es. *v1 14:32*, con il nome del file se analizzi un file).
@@ -83,12 +85,12 @@ Per sapere se una correzione ha davvero migliorato il master:
 Una diagnosi migliora se scende di gravità o, a parità di gravità, si avvicina al range in modo apprezzabile. La versione confrontata compare anche sullo spettro (puntinato grigio) e sulla cronologia della loudness (linea grigia tenue). Con il selettore *Confronta con* scegli la versione; da *Opzioni → Versioni* puoi rinominarla o eliminarla. Si tengono le ultime 8 versioni, salvate nel progetto (pochi KB l'una).
 
 ### Coerenza album
-Nell'app standalone, per un album, un EP o una serie di singoli: **Confronta più brani (album)** nella schermata iniziale, oppure trascina 2-30 file sulla finestra. I brani vengono analizzati in background, uno alla volta; poi la tabella confronta ogni brano con la **mediana dell'album**. La mediana, al contrario della media, non si sposta per un solo brano fuori posto, che così risulta segnalato da solo.
+Nell'app standalone, per un album, un EP o una serie di singoli: **Confronta più brani (album)** nella schermata iniziale (o *Opzioni → Nuovo album...*), oppure trascina i file sulla finestra. Puoi scegliere un file alla volta o più insieme e aggiungerne altri con **+ Aggiungi brano...** in fondo all'elenco (o trascinandoli sulla vista album), fino a 30 brani. I file vengono analizzati in background, uno alla volta, e ognuno entra nella tabella appena è pronto; da 2 brani in su la tabella confronta ogni brano con la **mediana dell'album**. La mediana, al contrario della media, non si sposta per un solo brano fuori posto, che così risulta segnalato da solo.
 - **Sezione più forte** (max short-term, cioè ritornello o drop): oltre ±1,5 LU dalla mediana è da verificare, oltre ±3 LU è critico. La colonna *Gain* indica di quanto alzare o abbassare il brano; se il true peak non lascia spazio, il consiglio è spingere il limiter. L'integrated è solo informativa: le ballate possono essere volutamente più basse.
 - **Bilanciamento tonale** per banda rispetto alla curva mediana dell'album, confrontando i ritornelli quando tutti i brani ne hanno uno. La tolleranza è di almeno 1,5 dB, più larga su Sub e Air. Le bande vicine spostate nella stessa direzione diventano una sola diagnosi con la correzione (shelf o campana larga, al massimo ±4 dB: oltre conviene intervenire nel mix).
 - **Ceiling true peak** diverso di oltre 1 dB e **larghezza stereo** diversa di oltre 8 punti: note informative (in azzurro).
 
-Clic su una riga per vedere a destra le diagnosi del brano e il suo tonale rispetto all'album; doppio clic (o *Mostra nella dashboard*) per aprirlo nella dashboard con l'analisi completa sul target attivo, la forma d'onda e l'ascolto. Il pulsante **Album** in alto riporta alla tabella. *Esporta* salva l'album come report HTML, testo, CSV o immagine. I risultati restano in memoria finché non premi *Svuota*; *Chiudi* torna alla schermata iniziale. Dalla riga di comando: `MasterAgentAnalyze --album brano1.wav brano2.wav ...`.
+Clic su una riga per vedere a destra le diagnosi del brano e il suo tonale rispetto all'album; doppio clic (o *Mostra nella dashboard*) per aprirlo nella dashboard con l'analisi completa sul target attivo, la forma d'onda e l'ascolto. Per togliere un brano dall'album: la **×** sulla riga, *Rimuovi brano* o il tasto Canc; mediana e confronto si ricalcolano sugli altri. *Interrompi* svuota la coda dei file ancora da analizzare. Il pulsante **Album** in alto riporta alla tabella. *Esporta* salva i dati dell'album (tabella, senza diagnosi né consigli) come report HTML, testo, CSV o immagine. I risultati restano in memoria finché non premi *Svuota*; *Chiudi* torna alla schermata iniziale. Dalla riga di comando: `MasterAgentAnalyze --album brano1.wav brano2.wav ...`.
 
 ### Spettro Mid/Side
 Il selettore **L+R | M/S** in alto a sinistra sullo spettro passa alla vista Mid/Side: Mid (ciò che sta al centro) e Side (la differenza tra i canali).

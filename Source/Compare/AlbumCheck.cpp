@@ -173,7 +173,7 @@ namespace
 AlbumResult checkAlbum (const std::vector<AnalysisSnapshot>& snapshots, const juce::StringArray& names)
 {
     AlbumResult result;
-    if (snapshots.size() < 2)
+    if (snapshots.empty())
         return result;
 
     // --- riferimenti dell'album: mediane ------------------------------------------------------------
@@ -312,7 +312,7 @@ AlbumResult checkAlbum (const std::vector<AnalysisSnapshot>& snapshots, const ju
 }
 
 //==============================================================================
-juce::String buildAlbumTextReport (const AlbumResult& album)
+juce::String buildAlbumTextReport (const AlbumResult& album, bool withDiagnoses)
 {
     juce::String t;
     t << "MASTERAGENT - " << "COERENZA ALBUM"_t << "\n"
@@ -347,6 +347,9 @@ juce::String buildAlbumTextReport (const AlbumResult& album)
         t << "\n";
     }
     t << "(* = " << "fuori tolleranza rispetto all'album"_t << ")\n";
+
+    if (! withDiagnoses)
+        return t;
 
     for (size_t i = 0; i < album.tracks.size(); ++i)
     {

@@ -25,25 +25,51 @@ namespace
         return s >= Severity::warning ? severityColour (s).withAlpha (s == Severity::critical ? 0.26f : 0.18f)
                                       : juce::Colours::transparentBlack;
     }
+
+    /** Croce della rimozione, centrata in r. */
+    void drawCross (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour colour)
+    {
+        const auto c = r.getCentre();
+        constexpr float h = 4.0f;
+        g.setColour (colour);
+        g.drawLine (c.x - h, c.y - h, c.x + h, c.y + h, 1.6f);
+        g.drawLine (c.x - h, c.y + h, c.x + h, c.y - h, 1.6f);
+    }
 }
 
 AlbumView::AlbumView() : Panel ("Coerenza album"_t, "panel:album")
 {
+    setWantsKeyboardFocus (true);
+
     showButton.setButtonText ("Mostra nella dashboard"_t);
     showButton.setTooltip ("Apre il brano selezionato nella dashboard, come file master: analisi completa con il target attivo"_t);
     showButton.onClick = [this] { if (onShowTrack && selected >= 0) onShowTrack (selected); };
 
+    removeButton.setButtonText ("Rimuovi brano"_t);
+    removeButton.setTooltip ("Toglie il brano selezionato dall'album (anche con il tasto Canc)"_t);
+    removeButton.onClick = [this] { removeSelected(); };
+
     exportButton.setButtonText ("Esporta"_t);
-    exportButton.setTooltip ("Salva l'album come report HTML, testo, CSV o immagine"_t);
+    exportButton.setTooltip ("Salva i dati dell'album come report HTML, testo, CSV o immagine"_t);
     exportButton.onClick = [this] { if (onExport) onExport(); };
 
-    clearButton.onClick = [this] { if (onClear) onClear(); };
+    clearButton.onClick = [this]
+    {
+        if (analysing())
+        {
+            if (onStop) onStop();
+        }
+        else if (onClear)
+        {
+            onClear();
+        }
+    };
 
     closeButton.setButtonText ("Chiudi"_t);
     closeButton.setTooltip ("Torna alla dashboard; i risultati dell'album restano disponibili dal menu Opzioni"_t);
     closeButton.onClick = [this] { if (onClose) onClose(); };
 
-    for (auto* b : { &showButton, &exportButton, &clearButton, &closeButton })
+    for (auto* b : { &showButton, &removeButton, &exportButton, &clearButton, &closeButton })
         addAndMakeVisible (b);
 
     updateButtons();
@@ -51,52 +77,80 @@ AlbumView::AlbumView() : Panel ("Coerenza album"_t, "panel:album")
 
 void AlbumView::setAlbum (const AlbumResult& result, const juce::StringArray& skippedFiles)
 {
+    // la selezione resta sullo stesso brano quando se ne aggiungono o tolgono altri
+    const auto previousName = juce::isPositiveAndBelow (selected, (int) album.tracks.size()) ? album.tracks[(size_t) selected].name
+                                                                                              : juce::String();
+    const int previousIndex = selected;
+
     album = result;
     skipped = skippedFiles;
-    analysing = false;
-    tableScroll = detailScroll = 0.0f;
-    hovered = -1;
+    hovered = {};
 
-    // parte dal brano messo peggio: è quello da guardare per primo
-    selected = album.tracks.empty() ? -1 : 0;
-    for (size_t i = 0; i < album.tracks.size(); ++i)
-        if (album.tracks[i].worst > album.tracks[(size_t) selected].worst)
+    selected = -1;
+    for (size_t i = 0; i < album.tracks.size() && previousName.isNotEmpty(); ++i)
+        if (album.tracks[i].name == previousName)
             selected = (int) i;
 
-    badge = album.tracks.empty() ? juce::String() : juce::String ((int) album.tracks.size()) + " " + "BRANI"_t;
+    if (! album.tracks.empty() && selected < 0)
+    {
+        if (previousIndex >= 0)
+        {
+            selected = std::min (previousIndex, (int) album.tracks.size() - 1);   // brano tolto: si passa al successivo
+        }
+        else
+        {
+            // nuovo album: si parte dal brano messo peggio, è quello da guardare per primo
+            selected = 0;
+            for (size_t i = 0; i < album.tracks.size(); ++i)
+                if (album.tracks[i].worst > album.tracks[(size_t) selected].worst)
+                    selected = (int) i;
+        }
+    }
+
+    if (selected != previousIndex || previousName.isEmpty())
+        detailScroll = 0.0f;
+    if (album.tracks.empty())
+        tableScroll = 0.0f;
+
     updateButtons();
     repaint();
 }
 
-void AlbumView::setProgress (bool isAnalysing, const juce::String& statusText, float progress)
+void AlbumView::setPending (const juce::StringArray& names, float currentProgress)
 {
-    if (isAnalysing == analysing && statusText == status && juce::approximatelyEqual (progress, progressValue))
+    if (names == pending && juce::approximatelyEqual (currentProgress, pendingProgress))
         return;
 
-    analysing = isAnalysing;
-    status = statusText;
-    progressValue = progress;
-    if (analysing)
-        badge = "ANALISI"_t;
+    pending = names;
+    pendingProgress = currentProgress;
     updateButtons();
     repaint();
 }
 
 void AlbumView::updateButtons()
 {
-    const bool ready = ! analysing && album.isValid();
-    showButton.setEnabled (ready && selected >= 0);
-    exportButton.setEnabled (ready);
-    clearButton.setButtonText (analysing ? "Interrompi"_t : "Svuota"_t);
-    clearButton.setTooltip (analysing ? "Interrompe l'analisi dei brani"_t : "Elimina i risultati dell'album e chiude il pannello"_t);
+    const bool hasSelection = juce::isPositiveAndBelow (selected, (int) album.tracks.size());
+    showButton.setEnabled (hasSelection);
+    removeButton.setEnabled (hasSelection);
+    exportButton.setEnabled (album.isValid());
+    clearButton.setEnabled (analysing() || ! album.tracks.empty() || ! skipped.isEmpty());
+    clearButton.setButtonText (analysing() ? "Interrompi"_t : "Svuota"_t);
+    clearButton.setTooltip (analysing() ? "Interrompe l'analisi dei brani in coda; quelli già analizzati restano"_t
+                                        : "Elimina i risultati dell'album e chiude il pannello"_t);
+
+    if (analysing())
+        badge = "ANALISI"_t;
+    else
+        badge = album.tracks.empty() ? juce::String()
+                                     : juce::String ((int) album.tracks.size()) + " " + (album.tracks.size() == 1 ? "BRANO"_t : "BRANI"_t);
 }
 
 void AlbumView::resized()
 {
     auto bar = getContentArea().removeFromTop (kBarHeight).toNearestInt().withSizeKeepingCentre (getContentArea().toNearestInt().getWidth(), 26);
-    for (auto* b : { &closeButton, &clearButton, &exportButton })
+    for (auto* b : { &closeButton, &clearButton, &exportButton, &removeButton })
     {
-        b->setBounds (bar.removeFromRight (b == &closeButton ? 80 : 92));
+        b->setBounds (bar.removeFromRight (b == &closeButton ? 80 : (b == &removeButton ? 120 : 92)));
         bar.removeFromRight (6);
     }
     showButton.setBounds (bar.removeFromRight (178));
@@ -114,7 +168,8 @@ AlbumView::Columns AlbumView::columnsFor (float width) const
     c.truePeak = 54.0f;
     c.width = 52.0f;
     c.status = 22.0f;
-    const float fixed = c.index + c.integrated + c.loudest + c.delta + c.gain + c.truePeak + c.width + c.status;
+    c.remove = 24.0f;
+    const float fixed = c.index + c.integrated + c.loudest + c.delta + c.gain + c.truePeak + c.width + c.status + c.remove;
     c.band = juce::jlimit (34.0f, 54.0f, (width - fixed - 140.0f) / (float) kNumBands);
     c.name = std::max (60.0f, width - fixed - c.band * (float) kNumBands);
     return c;
@@ -129,11 +184,7 @@ void AlbumView::paintContent (juce::Graphics& g, juce::Rectangle<float> area)
     // riepilogo dell'album
     {
         juce::AttributedString as;
-        if (analysing)
-        {
-            as.append ("Analisi dei brani in corso: ogni file viene letto per intero, offline."_t, fonts::label (12.5f), colours::textDim);
-        }
-        else if (album.isValid())
+        if (album.isValid())
         {
             const int toFix = album.critical + album.warning;
             as.append (toFix == 0 ? "Album coerente"_t
@@ -144,6 +195,16 @@ void AlbumView::paintContent (juce::Graphics& g, juce::Rectangle<float> area)
                        fonts::label (12.0f), colours::textDim);
             as.append ("    " + (album.usesLoudestSection ? "tonale confrontato sui ritornelli"_t : "tonale sul brano intero"_t),
                        fonts::label (12.0f), colours::textFaint);
+        }
+        else if (analysing())
+        {
+            as.append ("Analisi dei brani in corso: ogni file viene letto per intero, offline."_t, fonts::label (12.5f), colours::textDim);
+        }
+        else
+        {
+            as.append (album.tracks.empty() ? "Aggiungi i brani dell'album, anche uno alla volta."_t
+                                            : "Aggiungi almeno un altro brano: ognuno viene confrontato con il resto dell'album."_t,
+                       fonts::label (12.5f), colours::textDim);
         }
         if (! skipped.isEmpty())
             as.append ("\n" + "Saltati:"_t + " " + skipped.joinIntoString (", "), fonts::label (11.0f), colours::warning);
@@ -161,42 +222,38 @@ void AlbumView::paintContent (juce::Graphics& g, juce::Rectangle<float> area)
     auto table = area.removeFromLeft (std::floor (area.getWidth() * 0.64f));
     area.removeFromLeft (12.0f);
 
-    if (analysing)
-    {
-        paintProgress (g, table);
-        rowsArea = {};
-    }
-    else if (! album.isValid())
-    {
-        fillWell (g, table);
-        g.setColour (colours::textDim);
-        g.setFont (fonts::label (13.0f));
-        g.drawFittedText ("Servono almeno 2 brani analizzati. Trascina i file dell'album sulla finestra o usa Opzioni > Controlla coerenza album."_t,
-                          table.reduced (24.0f).toNearestInt(), juce::Justification::centred, 3);
-        rowsArea = {};
-    }
-    else
-    {
-        paintTable (g, table);
-    }
-
+    tableArea = table;
+    paintTable (g, table);
     paintDetails (g, area);
 }
 
-void AlbumView::paintProgress (juce::Graphics& g, juce::Rectangle<float> area)
+juce::Image AlbumView::createTableImage()
 {
-    fillWell (g, area);
-    auto centre = area.withSizeKeepingCentre (std::min (480.0f, area.getWidth() - 40.0f), 60.0f);
-    g.setColour (colours::text);
-    g.setFont (fonts::value (14.0f));
-    g.drawFittedText (status.isNotEmpty() ? status : "Preparazione..."_t, centre.removeFromTop (24.0f).toNearestInt(),
-                      juce::Justification::centredLeft, 1);
-    centre.removeFromTop (8.0f);
-    drawHBar (g, centre.removeFromTop (8.0f), progressValue, 0.0f, 1.0f, colours::accent);
-    centre.removeFromTop (8.0f);
-    g.setColour (colours::textFaint);
-    g.setFont (fonts::label (11.5f));
-    g.drawText ("Puoi chiudere il pannello: l'analisi continua e i risultati restano nel plugin."_t, centre, juce::Justification::centredLeft);
+    // altezza giusta per tutti i brani, anche quelli che nella vista andrebbero scorsi
+    const float width = tableArea.getWidth() > 100.0f ? tableArea.getWidth() : 900.0f;
+    const float height = 4.0f + 30.0f + (album.isValid() ? kRowHeight + 6.0f : 0.0f) + (float) album.tracks.size() * kRowHeight + 8.0f;
+    juce::Image image (juce::Image::ARGB, juce::roundToInt (width), juce::roundToInt (height), true);
+    {
+        const auto savedRows = rowsArea;
+        const float savedRemoveX = removeColumnX, savedContentHeight = tableContentHeight;
+        const juce::ScopedValueSetter<bool> exportingSetter (exporting, true);
+        const juce::ScopedValueSetter<float> scrollSetter (tableScroll, 0.0f);
+
+        juce::Graphics g (image);
+        g.fillAll (colours::panel);
+        paintTable (g, { 0.0f, 0.0f, width, height });
+
+        rowsArea = savedRows;
+        removeColumnX = savedRemoveX;
+        tableContentHeight = savedContentHeight;
+    }
+    repaint();   // le zone della guida tornano quelle della vista
+    return image;
+}
+
+juce::Rectangle<float> AlbumView::rowBounds (int index) const
+{
+    return { rowsArea.getX(), rowsArea.getY() + (float) index * kRowHeight - tableScroll, rowsArea.getWidth(), kRowHeight };
 }
 
 void AlbumView::paintTable (juce::Graphics& g, juce::Rectangle<float> area)
@@ -204,6 +261,7 @@ void AlbumView::paintTable (juce::Graphics& g, juce::Rectangle<float> area)
     fillWell (g, area);
     auto inner = area.reduced (8.0f, 4.0f);
     const auto c = columnsFor (inner.getWidth());
+    removeColumnX = inner.getRight() - c.remove;
 
     // una riga: celle da sinistra a destra con le larghezze delle colonne
     struct Cell { juce::String text; juce::Colour colour; juce::Colour tint; bool bold = false; };
@@ -257,7 +315,8 @@ void AlbumView::paintTable (juce::Graphics& g, juce::Rectangle<float> area)
         drawRow (header, cells, keys);
     }
 
-    // riferimento: la mediana dell'album
+    // riferimento: la mediana dell'album (da 2 brani in su)
+    if (album.isValid())
     {
         auto row = inner.removeFromTop (kRowHeight);
         g.setColour (colours::accent.withAlpha (0.07f));
@@ -281,22 +340,25 @@ void AlbumView::paintTable (juce::Graphics& g, juce::Rectangle<float> area)
         inner.removeFromTop (2.0f);
     }
 
+    // elenco: brani analizzati, file in coda e la riga per aggiungerne altri
+    const int numTracks = (int) album.tracks.size();
+    const int numRows = numTracks + (exporting ? 0 : pending.size() + 1);
     rowsArea = inner;
-    tableContentHeight = (float) album.tracks.size() * kRowHeight;
+    tableContentHeight = (float) numRows * kRowHeight;
     tableScroll = juce::jlimit (0.0f, std::max (0.0f, tableContentHeight - rowsArea.getHeight()), tableScroll);
 
     g.saveState();
     g.reduceClipRegion (rowsArea.toNearestInt());
-    for (size_t i = 0; i < album.tracks.size(); ++i)
+    for (int i = 0; i < numTracks; ++i)
     {
-        const auto& t = album.tracks[i];
-        const auto row = juce::Rectangle<float> (rowsArea.getX(), rowsArea.getY() + (float) i * kRowHeight - tableScroll,
-                                                 rowsArea.getWidth(), kRowHeight);
+        const auto& t = album.tracks[(size_t) i];
+        const auto row = rowBounds (i);
         if (row.getBottom() < rowsArea.getY() || row.getY() > rowsArea.getBottom())
             continue;
 
-        const bool isSelected = (int) i == selected;
-        if (isSelected || (int) i == hovered)
+        const bool isSelected = ! exporting && i == selected;
+        const bool isHovered = ! exporting && i == hovered.row;
+        if (isSelected || isHovered)
         {
             g.setColour (isSelected ? colours::accent.withAlpha (0.16f) : colours::hover);
             g.fillRoundedRectangle (row, 4.0f);
@@ -309,7 +371,7 @@ void AlbumView::paintTable (juce::Graphics& g, juce::Rectangle<float> area)
 
         const bool flagged = t.loudness != Severity::ok;
         std::vector<Cell> cells {
-            { juce::String ((int) i + 1), colours::textFaint, {} },
+            { juce::String (i + 1), colours::textFaint, {} },
             { t.name, isSelected ? colours::text : colours::text.withAlpha (0.9f), {}, isSelected },
             { num (t.integratedLufs), colours::textDim, {} },
             { num (t.loudestLufs), colours::text, {} },
@@ -327,12 +389,93 @@ void AlbumView::paintTable (juce::Graphics& g, juce::Rectangle<float> area)
         }
         cells.push_back ({ "*", severityColour (t.worst), {} });
         drawRow (row, cells, {});
+
+        // × per togliere il brano: sulla riga selezionata o sotto il mouse
+        if (isSelected || isHovered)
+        {
+            const auto cross = juce::Rectangle<float> (removeColumnX, row.getY(), c.remove, row.getHeight());
+            addHelp (cross, "album:remove");
+            const bool crossHovered = isHovered && hovered.remove;
+            if (crossHovered)
+            {
+                g.setColour (colours::critical.withAlpha (0.18f));
+                g.fillRoundedRectangle (cross.withSizeKeepingCentre (20.0f, 20.0f), 4.0f);
+            }
+            drawCross (g, cross, crossHovered ? colours::critical : colours::textDim);
+        }
+    }
+
+    // file in analisi o in coda
+    for (int p = 0; ! exporting && p < pending.size(); ++p)
+    {
+        const auto row = rowBounds (numTracks + p);
+        if (row.getBottom() < rowsArea.getY() || row.getY() > rowsArea.getBottom())
+            continue;
+        addHelp (row, "album:pending");
+
+        auto r = row;
+        g.setColour (colours::textFaint);
+        g.setFont (fonts::label (12.0f));
+        g.drawFittedText (juce::String (numTracks + p + 1), r.removeFromLeft (c.index).reduced (4.0f, 0.0f).toNearestInt(),
+                          juce::Justification::centredRight, 1);
+        g.setColour (colours::textDim);
+        g.drawFittedText (pending[p], r.removeFromLeft (c.name).reduced (4.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+
+        auto status = r.removeFromLeft (c.integrated + c.loudest + c.delta + c.gain + c.truePeak + c.width).reduced (6.0f, 0.0f);
+        if (p == 0)
+        {
+            const auto percent = juce::String (juce::roundToInt (pendingProgress * 100.0f)) + "%";
+            g.setColour (colours::textDim);
+            g.drawText ("Analisi"_t + " " + percent, status.removeFromRight (90.0f), juce::Justification::centredRight);
+            status.removeFromRight (8.0f);
+            drawHBar (g, status.withSizeKeepingCentre (status.getWidth(), 6.0f), pendingProgress, 0.0f, 1.0f, colours::accent);
+        }
+        else
+        {
+            g.setColour (colours::textFaint);
+            g.drawText ("in coda"_t, status, juce::Justification::centredLeft);
+        }
+    }
+
+    // + Aggiungi brano
+    if (! exporting)
+    {
+        const auto row = rowBounds (numTracks + pending.size());
+        addHelp (row, "album:add");
+        if (hovered.add && canAdd())
+        {
+            g.setColour (colours::hover);
+            g.fillRoundedRectangle (row, 4.0f);
+        }
+        auto r = row.withTrimmedLeft (c.index);
+        g.setFont (fonts::value (12.5f));
+        if (canAdd())
+        {
+            g.setColour (hovered.add ? colours::accent : colours::accent.withAlpha (0.85f));
+            g.drawText ("+  " + "Aggiungi brano..."_t, r.reduced (4.0f, 0.0f), juce::Justification::centredLeft);
+        }
+        else
+        {
+            g.setColour (colours::textFaint);
+            g.drawText ("Album completo: al massimo %d brani"_t.replace ("%d", juce::String (album::maxTracks)),
+                        r.reduced (4.0f, 0.0f), juce::Justification::centredLeft);
+        }
     }
     g.restoreState();
     addHelp (rowsArea, "album:row");
 
+    // album vuoto: come si comincia
+    if (! exporting && numTracks == 0 && pending.isEmpty())
+    {
+        const auto hint = rowsArea.withTrimmedTop (kRowHeight + 24.0f).withHeight (60.0f).reduced (24.0f, 0.0f);
+        g.setColour (colours::textFaint);
+        g.setFont (fonts::label (13.0f));
+        g.drawFittedText ("Scegli i file uno alla volta o più insieme, oppure trascinali sulla finestra."_t,
+                          hint.toNearestInt(), juce::Justification::centredTop, 2);
+    }
+
     // barra di scorrimento quando i brani non ci stanno
-    if (tableContentHeight > rowsArea.getHeight())
+    if (! exporting && tableContentHeight > rowsArea.getHeight())
     {
         const float h = rowsArea.getHeight() * rowsArea.getHeight() / tableContentHeight;
         const float y = rowsArea.getY() + (rowsArea.getHeight() - h) * tableScroll / (tableContentHeight - rowsArea.getHeight());
@@ -348,12 +491,13 @@ void AlbumView::paintDetails (juce::Graphics& g, juce::Rectangle<float> area)
     addHelp (area, "album:details");
     auto inner = area.reduced (12.0f, 10.0f);
 
-    if (analysing || ! juce::isPositiveAndBelow (selected, (int) album.tracks.size()))
+    if (! juce::isPositiveAndBelow (selected, (int) album.tracks.size()))
     {
         g.setColour (colours::textFaint);
         g.setFont (fonts::label (12.5f));
-        g.drawFittedText (analysing ? "Le diagnosi di ogni brano compaiono qui al termine dell'analisi."_t
-                                    : "Seleziona un brano nella tabella."_t,
+        g.drawFittedText (album.tracks.empty() ? (analysing() ? "Le diagnosi di ogni brano compaiono qui al termine dell'analisi."_t
+                                                              : "Qui compaiono le differenze di ogni brano dal resto dell'album."_t)
+                                               : "Seleziona un brano nella tabella."_t,
                           inner.toNearestInt(), juce::Justification::centred, 3);
         return;
     }
@@ -377,6 +521,16 @@ void AlbumView::paintDetails (juce::Graphics& g, juce::Rectangle<float> area)
                               .replace ("%3", num (t.truePeakDb)).replace ("%4", num (t.plr)).replace ("%5", num (t.lra)),
                           inner.removeFromTop (18.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.75f);
         inner.removeFromTop (6.0f);
+    }
+
+    // un solo brano: non c'è ancora niente con cui confrontarlo
+    if (! album.isValid())
+    {
+        g.setColour (colours::textFaint);
+        g.setFont (fonts::label (12.5f));
+        g.drawFittedText ("Aggiungi almeno un altro brano: il confronto con l'album parte da 2 brani."_t,
+                          inner.removeFromTop (40.0f).toNearestInt(), juce::Justification::topLeft, 2);
+        return;
     }
 
     // bilanciamento tonale rispetto all'album: barre dal centro, fascia = tolleranza
@@ -472,12 +626,24 @@ void AlbumView::paintDetails (juce::Graphics& g, juce::Rectangle<float> area)
 }
 
 //==============================================================================
-int AlbumView::rowAt (juce::Point<float> p) const
+AlbumView::Hit AlbumView::hitTest (juce::Point<float> p) const
 {
-    if (analysing || ! rowsArea.contains (p))
-        return -1;
+    Hit hit;
+    if (! rowsArea.contains (p))
+        return hit;
+
     const int index = (int) std::floor ((p.y - rowsArea.getY() + tableScroll) / kRowHeight);
-    return juce::isPositiveAndBelow (index, (int) album.tracks.size()) ? index : -1;
+    const int numTracks = (int) album.tracks.size();
+    if (juce::isPositiveAndBelow (index, numTracks))
+    {
+        hit.row = index;
+        hit.remove = p.x >= removeColumnX;
+    }
+    else if (index == numTracks + pending.size())
+    {
+        hit.add = true;
+    }
+    return hit;
 }
 
 void AlbumView::select (int index)
@@ -490,36 +656,56 @@ void AlbumView::select (int index)
     repaint();
 }
 
+void AlbumView::removeSelected()
+{
+    if (juce::isPositiveAndBelow (selected, (int) album.tracks.size()) && onRemoveTrack)
+        onRemoveTrack (selected);
+}
+
 void AlbumView::mouseMove (const juce::MouseEvent& e)
 {
-    const int row = rowAt (e.position);
-    setMouseCursor (row >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
-    if (row != hovered)
+    const auto hit = hitTest (e.position);
+    const bool clickable = hit.row >= 0 || (hit.add && canAdd());
+    setMouseCursor (clickable ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    if (hit.row != hovered.row || hit.remove != hovered.remove || hit.add != hovered.add)
     {
-        hovered = row;
+        hovered = hit;
         repaint();
     }
 }
 
 void AlbumView::mouseExit (const juce::MouseEvent&)
 {
-    if (hovered >= 0)
+    if (hovered.row >= 0 || hovered.add)
     {
-        hovered = -1;
+        hovered = {};
         repaint();
     }
 }
 
 void AlbumView::mouseDown (const juce::MouseEvent& e)
 {
-    if (const int row = rowAt (e.position); row >= 0)
-        select (row);
+    grabKeyboardFocus();   // Canc e frecce sulla tabella
+
+    const auto hit = hitTest (e.position);
+    if (hit.add)
+    {
+        if (canAdd() && onAddTracks)
+            onAddTracks();
+        return;
+    }
+    if (hit.row < 0)
+        return;
+
+    select (hit.row);
+    if (hit.remove)
+        removeSelected();
 }
 
 void AlbumView::mouseDoubleClick (const juce::MouseEvent& e)
 {
-    if (const int row = rowAt (e.position); row >= 0 && onShowTrack)
-        onShowTrack (row);
+    if (const auto hit = hitTest (e.position); hit.row >= 0 && ! hit.remove && onShowTrack)
+        onShowTrack (hit.row);
 }
 
 void AlbumView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
@@ -532,6 +718,36 @@ void AlbumView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWhee
     else
         return;
     repaint();
+}
+
+bool AlbumView::keyPressed (const juce::KeyPress& key)
+{
+    const int numTracks = (int) album.tracks.size();
+    if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
+    {
+        removeSelected();
+        return true;
+    }
+    if ((key == juce::KeyPress::upKey || key == juce::KeyPress::downKey) && numTracks > 0)
+    {
+        const int step = key == juce::KeyPress::upKey ? -1 : 1;
+        select (juce::jlimit (0, numTracks - 1, selected < 0 ? 0 : selected + step));
+
+        // la riga selezionata resta visibile
+        const auto row = rowBounds (selected);
+        if (row.getY() < rowsArea.getY())
+            tableScroll -= rowsArea.getY() - row.getY();
+        else if (row.getBottom() > rowsArea.getBottom())
+            tableScroll += row.getBottom() - rowsArea.getBottom();
+        repaint();
+        return true;
+    }
+    if (key == juce::KeyPress::returnKey && juce::isPositiveAndBelow (selected, numTracks) && onShowTrack)
+    {
+        onShowTrack (selected);
+        return true;
+    }
+    return false;
 }
 
 } // namespace ma::ui

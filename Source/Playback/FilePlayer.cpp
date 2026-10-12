@@ -28,6 +28,7 @@ bool FilePlayer::load (const juce::File& newFile)
     transport.setSource (source.get(), 1 << 16, &readAheadThread, fileRate, 2);
     readerSource = std::move (source);
     file = newFile;
+    ++seekCount;
     return true;
 }
 
@@ -67,7 +68,10 @@ void FilePlayer::play()
         return;
     // dalla fine del brano riparte dall'inizio
     if (getLength() > 0.0 && getPosition() >= getLength() - 0.05)
+    {
         transport.setPosition (0.0);
+        ++seekCount;
+    }
     transport.start();
 }
 
@@ -84,6 +88,7 @@ bool FilePlayer::isPlaying() const
 void FilePlayer::setPosition (double seconds)
 {
     transport.setPosition (juce::jlimit (0.0, std::max (0.0, getLength()), seconds));
+    ++seekCount;
 }
 
 double FilePlayer::getPosition() const
