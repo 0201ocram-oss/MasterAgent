@@ -34,7 +34,8 @@ set(MASTERAGENT_CORE_SOURCES
     Source/Compare/EqSuggestion.cpp
     Source/Compare/VersionCompare.cpp
     Source/Compare/AlbumCheck.cpp
-    Source/Compare/ReportExporter.cpp)
+    Source/Compare/ReportExporter.cpp
+    Source/Playback/Monitor.cpp)
 
 set(MASTERAGENT_JUCE_MODULES
     juce::juce_audio_utils
@@ -141,7 +142,8 @@ if(MASTERAGENT_BUILD_TESTS)
         Tests/SnapshotTests.cpp
         Tests/AlbumTests.cpp
         Tests/TimelineTests.cpp
-        Tests/HtmlReportTests.cpp)
+        Tests/HtmlReportTests.cpp
+        Tests/MonitorTests.cpp)
 
     target_include_directories(MasterAgentTests PRIVATE Source Tests)
 

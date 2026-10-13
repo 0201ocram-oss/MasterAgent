@@ -30,6 +30,9 @@ public:
     /** L'utente ha segnato (o ripristinato) una diagnosi come scelta voluta. */
     std::function<void (const juce::String& findingId, bool ignored)> onIgnoreChanged;
 
+    /** "Ascolta il problema": monitor sulla parte del segnale che riguarda la diagnosi (vedi monitorForFinding). */
+    std::function<void (const Finding& finding)> onListen;
+
     /** Versioni del master: salva l'analisi attuale / scegli con quale confrontare (-1 = nessuna). */
     std::function<void()> onSaveVersion;
     std::function<void (int index)> onCompareVersionChanged;

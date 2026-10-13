@@ -145,7 +145,7 @@ MasterAgentEditor::MasterAgentEditor (MasterAgentProcessor& p)
     header.onReset = [this] { processor.resetAnalysis(); };
     header.onExport = [this] { exportReport(); };
     header.onOptions = [this] { showOptionsMenu(); };
-    header.onListenChanged = [this] (bool on) { processor.listenReference.store (on); layoutDashboard(); content.repaint(); };
+    header.onListenChanged = [this] (bool on) { setListening (on); };
     header.onHelpModeChanged = [this] (bool on) { setHelpMode (on); };
     header.onToggleFullScreen = [this] { setFullScreenAsync (! isFullScreen()); };
     header.onLiveModeChanged = [this] (bool live) { processor.setLiveMode (live, processor.liveWindowSeconds.load()); };
@@ -184,6 +184,27 @@ MasterAgentEditor::MasterAgentEditor (MasterAgentProcessor& p)
         processor.setFindingIgnored (id, ignored);
         updateComparison();
         pushDataToPanels();
+    };
+
+    // monitor d'ascolto: selettore dello stereo, bande dello spettro, "Ascolta il problema" nel report
+    data.monitor = processor.getMonitor().getChoice();
+    stereoPanel.onMonitorChanged = [this] (MonitorChoice choice) { setMonitor (choice); };
+    spectrumPanel.onSoloBand = [this] (int band)
+    {
+        const MonitorChoice choice { MonitorMode::band, band };
+        setMonitor (data.monitor == choice ? MonitorChoice() : choice);
+    };
+    reportPanel.onListen = [this] (const Finding& finding)
+    {
+        setMonitor (monitorForFinding (finding, data.comparison));
+
+        // nell'app si ascolta dal punto in cui il problema è più evidente
+        if (standalone && data.masterFromFile && finding.hasTime())
+        {
+            auto& player = processor.getPlayer();
+            player.setPosition (std::max (0.0, (double) finding.timeStart - 2.0));
+            player.play();
+        }
     };
 
     refreshTargets();
@@ -322,7 +343,11 @@ void MasterAgentEditor::paintDashboard (juce::Graphics& g)
     }
 
     g.drawImageTransformed (backgroundCache, juce::AffineTransform::scale (1.0f / backgroundScale));
+    paintBanners (g);
+}
 
+void MasterAgentEditor::paintBanners (juce::Graphics& g)
+{
     if (processor.listenReference.load())
     {
         auto banner = bannerArea (0).toFloat();
@@ -339,6 +364,68 @@ void MasterAgentEditor::paintDashboard (juce::Graphics& g)
                                      + match + "). Disattivalo prima dell'export!",
                     banner, juce::Justification::centred);
     }
+
+    if (const int index = monitorBannerIndex(); index >= 0)
+    {
+        auto banner = bannerArea (index).toFloat();
+        g.setGradientFill (juce::ColourGradient (colours::info.darker (0.55f), banner.getX(), 0.0f,
+                                                 colours::accent.darker (0.75f), banner.getRight(), 0.0f, false));
+        g.fillRect (banner);
+        g.setColour (juce::Colours::white);
+        g.setFont (fonts::value (13.0f));
+        const auto what = describeMonitor (data.monitor);
+        g.drawText ("MONITOR: "_t + what.toUpperCase() + "  -  "
+                        + (standalone ? "stai ascoltando solo una parte del segnale"_t
+                                      : "l'uscita del plugin non è il master: disattivalo prima dell'export!"_t)
+                        + "   " + "(clic qui per tornare all'ascolto normale)"_t,
+                    banner, juce::Justification::centred);
+    }
+}
+
+int MasterAgentEditor::monitorBannerIndex() const
+{
+    if (data.monitor.mode == MonitorMode::off)
+        return -1;
+    return processor.listenReference.load() ? 1 : 0;
+}
+
+void MasterAgentEditor::contentMouseDown (juce::Point<int> position)
+{
+    // clic su un banner: si spegne ciò che segnala
+    for (int i = 0; i < bannerCount(); ++i)
+        if (bannerArea (i).contains (position))
+        {
+            if (i == monitorBannerIndex())
+                setMonitor ({});
+            else
+                setListening (false);
+            return;
+        }
+}
+
+void MasterAgentEditor::setMonitor (MonitorChoice choice)
+{
+    processor.getMonitor().setChoice (choice);
+    data.monitor = processor.getMonitor().getChoice();
+    if (const int banners = bannerCount(); banners != lastBannerCount)
+    {
+        lastBannerCount = banners;
+        layoutDashboard();
+    }
+    pushDataToPanels();
+    content.repaint();
+}
+
+void MasterAgentEditor::setListening (bool on)
+{
+    processor.listenReference.store (on);
+    header.setListening (on);
+    if (const int banners = bannerCount(); banners != lastBannerCount)
+    {
+        lastBannerCount = banners;
+        layoutDashboard();
+    }
+    content.repaint();
 }
 
 void MasterAgentEditor::paintDragOverlay (juce::Graphics& g)
@@ -404,7 +491,7 @@ void MasterAgentEditor::layoutDashboard()
 
 int MasterAgentEditor::bannerCount() const
 {
-    return processor.listenReference.load() ? 1 : 0;
+    return (processor.listenReference.load() ? 1 : 0) + (data.monitor.mode != MonitorMode::off ? 1 : 0);
 }
 
 juce::Rectangle<int> MasterAgentEditor::bannerArea (int index) const
@@ -668,6 +755,7 @@ void MasterAgentEditor::timerCallback()
         processor.getLiveAnalysis().getSnapshot (data.master);
     }
 
+    data.monitor = processor.getMonitor().getChoice();
     if (const int banners = bannerCount(); banners != lastBannerCount)
     {
         lastBannerCount = banners;
@@ -1016,6 +1104,20 @@ void MasterAgentEditor::showOptionsMenu()
                   [this] { processor.abMatchLoudestSection.store (false); });
     menu.addItem ("Allinea il livello sulla sezione più forte (ritornello/drop)"_u, true, processor.abMatchLoudestSection.load(),
                   [this] { processor.abMatchLoudestSection.store (true); });
+    {
+        // da dove suona il reference all'attivazione, al play e a ogni salto
+        using Pos = MasterAgentProcessor::AbPosition;
+        const auto current = (Pos) processor.abPosition.load();
+        juce::PopupMenu positionMenu;
+        auto item = [&] (Pos pos, const juce::String& text)
+        {
+            positionMenu.addItem (text, true, current == pos, [this, pos] { processor.abPosition.store ((int) pos); });
+        };
+        item (Pos::samePoint, "Dallo stesso punto del brano"_t);
+        item (Pos::loudestSection, "Dal ritornello del reference (sezione più forte)"_t);
+        item (Pos::resume, "Da dove si era fermato"_t);
+        menu.addSubMenu ("Posizione del reference"_t, positionMenu);
+    }
     menu.addSectionHeader ("Master"_t);
 
     {

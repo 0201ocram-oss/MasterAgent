@@ -4,6 +4,7 @@
 #include "../Compare/Comparator.h"
 #include "../Compare/VersionCompare.h"
 #include "../Compare/TargetProfile.h"
+#include "../Playback/Monitor.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -123,6 +124,8 @@ struct DashboardData
     float highlightTimeEnd = -1.0f;
 
     bool helpMode = false;                    // tasto "?": i pannelli spiegano cosa misura l'elemento sotto il mouse
+
+    MonitorChoice monitor;                    // cosa si sta ascoltando (mono, side, una banda)
 
     bool masterFromFile = false;              // il master è un file analizzato offline, non l'ingresso live
     juce::String masterFileName;

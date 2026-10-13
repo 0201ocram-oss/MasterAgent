@@ -5,10 +5,67 @@
 namespace ma::ui
 {
 
+void StereoPanel::drawMonitorSelector (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    // nella riga del titolo, a destra: cosa si ascolta in uscita
+    constexpr float segment = 50.0f, height = 18.0f;
+    auto pill = juce::Rectangle<float> (area.getRight() - 3.0f * segment, area.getY() - 25.0f, 3.0f * segment, height);
+    addHelp (pill.withLeft (pill.getX() - 50.0f), "monitor");
+
+    const auto choice = data->monitor;
+    const int selected = choice.mode == MonitorMode::off ? 0 : (choice.mode == MonitorMode::mono ? 1 : (choice.mode == MonitorMode::side ? 2 : -1));
+
+    g.setFont (fonts::label (10.5f));
+    g.setColour (colours::textFaint);
+    g.drawText ("Ascolta"_t, pill.withWidth (48.0f).translated (-52.0f, 0.0f), juce::Justification::centredRight);
+
+    g.setColour (colours::panel.withAlpha (0.9f));
+    g.fillRoundedRectangle (pill, 9.0f);
+
+    static const char* names[] { "Stereo", "Mono", "Side" };
+    for (int i = 0; i < 3; ++i)
+    {
+        auto r = pill.withX (pill.getX() + (float) i * segment).withWidth (segment);
+        monitorButtons[(size_t) i] = r;
+        if (i == selected)
+        {
+            g.setColour ((i == 0 ? colours::accent : colours::info).withAlpha (i == 0 ? 0.22f : 0.45f));
+            g.fillRoundedRectangle (r, 9.0f);
+        }
+        g.setFont (fonts::value (10.0f));
+        g.setColour (i == selected ? colours::text : colours::textDim);
+        g.drawText (names[i], r, juce::Justification::centred);
+    }
+    g.setColour (choice.mode != MonitorMode::off ? colours::info.withAlpha (0.8f) : colours::line);
+    g.drawRoundedRectangle (pill, 9.0f, 1.0f);
+}
+
+void StereoPanel::mouseDown (const juce::MouseEvent& e)
+{
+    if (data == nullptr || ! onMonitorChanged)
+        return;
+
+    for (int i = 0; i < 3; ++i)
+        if (monitorButtons[(size_t) i].contains (e.position))
+        {
+            const auto mode = i == 0 ? MonitorMode::off : (i == 1 ? MonitorMode::mono : MonitorMode::side);
+            // di nuovo sullo stesso: si torna all'ascolto normale
+            onMonitorChanged (mode == data->monitor.mode ? MonitorChoice() : MonitorChoice { mode, -1 });
+            return;
+        }
+}
+
+void StereoPanel::mouseMove (const juce::MouseEvent& e)
+{
+    const bool over = std::any_of (monitorButtons.begin(), monitorButtons.end(), [&] (const auto& r) { return r.contains (e.position); });
+    setMouseCursor (over ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+}
+
 void StereoPanel::paintContent (juce::Graphics& g, juce::Rectangle<float> area)
 {
     const auto& d = *data;
     const auto& s = d.master;
+    drawMonitorSelector (g, area);
 
     const float gonioSize = std::min (area.getHeight() * 0.6f, area.getWidth() * 0.48f);
     auto top = area.removeFromTop (gonioSize);

@@ -6,6 +6,7 @@
 #include "Compare/Comparator.h"
 #include "Compare/TargetProfile.h"
 #include "Playback/FilePlayer.h"
+#include "Playback/Monitor.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -74,6 +75,17 @@ public:
     */
     std::atomic<bool> abMatchLoudestSection { false };
     std::atomic<double> liveWindowSeconds { 20.0 };
+
+    /**
+        Da che punto suona il reference quando si attiva l'A/B, quando parte la riproduzione e a ogni salto.
+        Il reference segue il lettore (standalone) o il transport della DAW: a riproduzione ferma tace.
+    */
+    enum class AbPosition { samePoint = 0, loudestSection, resume };
+    std::atomic<int> abPosition { (int) AbPosition::samePoint };
+    static constexpr double abFadeSeconds = 0.03;
+
+    /** Monitor d'ascolto (mono, side, una banda): solo sull'uscita, mai salvato nel progetto. */
+    ma::Monitor& getMonitor() noexcept { return monitor; }
 
     /** Fase di lavoro: sul mix bus durante il mixaggio oppure sul master (cambia target e consigli). */
     std::atomic<bool> mixPhase { false };
@@ -215,6 +227,20 @@ private:
 
     double currentSampleRate = 48000.0;
     bool wasPlaying = false;
+
+    /**
+        Audio thread: ascolto A/B con dissolvenza. running = il brano sta suonando (altrimenti il reference tace),
+        resync = si è appena avviato o spostato, songTime = posizione del brano all'inizio del blocco (NaN se ignota).
+    */
+    void renderReference (juce::AudioBuffer<float>& buffer, int numChannels, bool running, bool resync, double songTime) noexcept;
+
+    ma::Monitor monitor;
+    juce::AudioBuffer<float> abScratch;       // blocco del reference, allocato in prepareToPlay
+    float abMix = 0.0f;                       // 0 = master, 1 = reference
+    float abStep = 0.001f;
+    bool abWasOn = false;
+    double expectedSongTime = -1.0e9;         // DAW: per riconoscere salti e loop del transport
+    bool playerWasPlaying = false;
 
     /**
         Standalone: liveAnalysis segue il brano mentre si ascolta, per i valori istantanei della dashboard.

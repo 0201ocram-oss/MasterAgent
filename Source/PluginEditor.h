@@ -43,6 +43,7 @@ private:
         void fileDragExit (const juce::StringArray&) override                  { owner.dragHover = false; repaint(); }
         void filesDropped (const juce::StringArray& files, int x, int y) override { owner.filesDropped (files, { x, y }); }
         bool keyPressed (const juce::KeyPress& key) override                  { return owner.contentKeyPressed (key); }
+        void mouseDown (const juce::MouseEvent& e) override                   { owner.contentMouseDown (e.getPosition()); }
 
     private:
         MasterAgentEditor& owner;
@@ -62,9 +63,16 @@ private:
     void filesDropped (const juce::StringArray& files, juce::Point<int> position);
     bool contentKeyPressed (const juce::KeyPress& key);
 
-    // banner sotto la barra in alto: ascolto del reference
+    // banner sotto la barra in alto: ascolto del reference, monitor (un clic sul banner lo spegne)
     int bannerCount() const;
     juce::Rectangle<int> bannerArea (int index) const;
+    int monitorBannerIndex() const;   // -1 se il monitor è spento
+    void contentMouseDown (juce::Point<int> position);
+    void paintBanners (juce::Graphics& g);
+
+    /** Monitor d'ascolto (mono, side, una banda). */
+    void setMonitor (ma::MonitorChoice choice);
+    void setListening (bool on);
 
     void timerCallback() override;
     void refreshTargets();

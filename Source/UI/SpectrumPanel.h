@@ -22,6 +22,11 @@ public:
     /** Clic sul selettore L+R | M/S. */
     std::function<void()> onToggleMidSide;
 
+    /** Clic su una banda: ascoltala da sola (di nuovo: ascolto normale). */
+    std::function<void (int band)> onSoloBand;
+
+    juce::String getTooltip() override;
+
 private:
     void drawSpectrum (juce::Graphics& g, juce::Rectangle<float> r);
     void drawBandDeltas (juce::Graphics& g, juce::Rectangle<float> r);

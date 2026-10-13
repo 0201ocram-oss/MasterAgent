@@ -79,6 +79,8 @@ private:
 /**
     Brano di riferimento: caricamento e analisi in background, più un buffer ricampionato
     alla frequenza dell'host per l'ascolto A/B con livello allineato.
+    In memoria resta solo il buffer di ascolto: se cambia il sample rate dell'host il file si rilegge
+    (senza rifare l'analisi).
 */
 class ReferenceTrack : private juce::Thread
 {
@@ -91,7 +93,7 @@ public:
     void load (const juce::File& file, double hostSampleRate);
     void clear();
 
-    /** Se il sample rate dell'host cambia, ricampiona il buffer di playback. */
+    /** Se il sample rate dell'host cambia, ricampiona il buffer di playback in background. */
     void setHostSampleRate (double newRate);
 
     State getState() const noexcept { return state.load(); }
@@ -101,29 +103,42 @@ public:
 
     bool getSnapshot (AnalysisSnapshot& dest) const;
 
-    /** Audio thread: scrive il reference (in loop) nei buffer con il guadagno indicato. Restituisce false se non disponibile. */
+    /**
+        Audio thread: scrive il reference (in loop) in left/right, sovrascrivendoli, con il guadagno indicato e
+        avanza. right può essere nullptr (uscita mono: somma dei canali). Restituisce false se non disponibile.
+    */
     bool renderPlayback (float* left, float* right, int numSamples, float gain) noexcept;
+
+    /** Audio thread: porta l'ascolto al secondo indicato (oltre la fine riparte dall'inizio, come il loop). */
+    void seekPlayback (double seconds) noexcept;
+
+    /** Inizio della sezione più forte (ritornello/drop) del reference, in secondi. */
+    double getLoudestStartSeconds() const noexcept { return loudestStart.load(); }
 
     static constexpr double maxDurationSeconds = 20.0 * 60.0;
 
+    /** Inizio della prima sezione che arriva entro 1 LU dal massimo short-term (0 se la cronologia è vuota). */
+    static double findLoudestStart (const AnalysisSnapshot& s);
+
 private:
     void run() override;
-    void buildPlaybackBuffer (double hostRate);
+    static juce::AudioBuffer<float> makePlaybackBuffer (const juce::AudioBuffer<float>& source, double sourceRate, double hostRate);
 
     std::atomic<State> state { State::empty };
     std::atomic<float> progress { 0.0f };
+    std::atomic<double> loudestStart { 0.0 };
 
+    std::mutex controlMutex;                // avvio e arresto del thread (GUI e prepareToPlay)
     mutable std::mutex dataMutex;
     juce::File file;
     juce::String error;
     AnalysisSnapshot snapshot;
-
-    juce::AudioBuffer<float> sourceAudio;   // audio originale (per ricampionare)
-    double sourceRate = 0.0;
     double pendingHostRate = 48000.0;
+    bool resampleOnly = false;              // il thread rilegge il file solo per il nuovo sample rate
 
     juce::SpinLock playbackLock;
     juce::AudioBuffer<float> playback;      // al sample rate dell'host
+    double playbackRate = 0.0;              // sample rate di playback
     int playbackPos = 0;
 };
 

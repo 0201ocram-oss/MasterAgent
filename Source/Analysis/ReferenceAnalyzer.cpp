@@ -227,6 +227,7 @@ ReferenceTrack::~ReferenceTrack()
 
 void ReferenceTrack::load (const juce::File& newFile, double hostSampleRate)
 {
+    const std::lock_guard<std::mutex> control (controlMutex);
     stopThread (4000);
 
     {
@@ -234,6 +235,7 @@ void ReferenceTrack::load (const juce::File& newFile, double hostSampleRate)
         file = newFile;
         error.clear();
         pendingHostRate = hostSampleRate;
+        resampleOnly = false;
     }
 
     progress.store (0.0f);
@@ -243,6 +245,7 @@ void ReferenceTrack::load (const juce::File& newFile, double hostSampleRate)
 
 void ReferenceTrack::clear()
 {
+    const std::lock_guard<std::mutex> control (controlMutex);
     stopThread (4000);
 
     {
@@ -250,13 +253,15 @@ void ReferenceTrack::clear()
         file = juce::File();
         error.clear();
         snapshot = {};
-        sourceAudio.setSize (0, 0);
+        resampleOnly = false;
     }
     {
         const juce::SpinLock::ScopedLockType lock (playbackLock);
         playback.setSize (0, 0);
         playbackPos = 0;
+        playbackRate = 0.0;
     }
+    loudestStart.store (0.0);
     state.store (State::empty);
 }
 
@@ -284,31 +289,45 @@ bool ReferenceTrack::getSnapshot (AnalysisSnapshot& dest) const
 
 void ReferenceTrack::setHostSampleRate (double newRate)
 {
-    std::lock_guard<std::mutex> lock (dataMutex);
-    pendingHostRate = newRate;
+    const std::lock_guard<std::mutex> control (controlMutex);
+    {
+        std::lock_guard<std::mutex> lock (dataMutex);
+        pendingHostRate = newRate;
+    }
 
-    if (state.load() == State::ready && sourceAudio.getNumSamples() > 0)
-        buildPlaybackBuffer (newRate);
+    // un caricamento in corso legge il nuovo valore da solo; a reference pronto si rilegge il file in background
+    double currentRate;
+    {
+        const juce::SpinLock::ScopedLockType lock (playbackLock);
+        currentRate = playbackRate;
+    }
+    if (state.load() == State::ready && std::abs (currentRate - newRate) > 1e-6 && ! isThreadRunning())
+    {
+        {
+            std::lock_guard<std::mutex> lock (dataMutex);
+            resampleOnly = true;
+        }
+        startThread (juce::Thread::Priority::background);
+    }
 }
 
-void ReferenceTrack::buildPlaybackBuffer (double hostRate)
+juce::AudioBuffer<float> ReferenceTrack::makePlaybackBuffer (const juce::AudioBuffer<float>& source, double sourceRate, double hostRate)
 {
-    // chiamato con dataMutex acquisito
     juce::AudioBuffer<float> resampled;
     const double ratio = sourceRate / hostRate;
 
     if (std::abs (ratio - 1.0) < 1e-9)
     {
-        resampled.makeCopyOf (sourceAudio);
+        resampled.makeCopyOf (source);
     }
     else
     {
-        const int outSamples = (int) std::floor (sourceAudio.getNumSamples() / ratio);
+        const int outSamples = (int) std::floor (source.getNumSamples() / ratio);
         resampled.setSize (2, outSamples);
         for (int ch = 0; ch < 2; ++ch)
         {
             juce::WindowedSincInterpolator interpolator;
-            interpolator.process (ratio, sourceAudio.getReadPointer (std::min (ch, sourceAudio.getNumChannels() - 1)),
+            interpolator.process (ratio, source.getReadPointer (std::min (ch, source.getNumChannels() - 1)),
                                   resampled.getWritePointer (ch), outSamples);
         }
     }
@@ -318,20 +337,32 @@ void ReferenceTrack::buildPlaybackBuffer (double hostRate)
         resampled.setSize (2, resampled.getNumSamples(), true);
         resampled.copyFrom (1, 0, resampled, 0, 0, resampled.getNumSamples());
     }
+    return resampled;
+}
 
-    const juce::SpinLock::ScopedLockType lock (playbackLock);
-    std::swap (playback, resampled);
-    playbackPos = 0;
+double ReferenceTrack::findLoudestStart (const AnalysisSnapshot& s)
+{
+    const auto& history = s.shortTermHistory;
+    if (history.empty())
+        return 0.0;
+
+    // la prima volta che lo short-term arriva vicino al massimo: l'inizio del primo ritornello/drop pieno
+    const float peak = *std::max_element (history.begin(), history.end());
+    for (size_t k = 0; k < history.size(); ++k)
+        if (history[k] >= peak - 1.0f)
+            return std::max (0.0, s.historyStartSongSec + 0.1 * (double) k - 3.0);   // la finestra short-term dura 3 s
+    return 0.0;
 }
 
 void ReferenceTrack::run()
 {
     juce::File toLoad;
-    double hostRate;
+    bool onlyResample;
     {
         std::lock_guard<std::mutex> lock (dataMutex);
         toLoad = file;
-        hostRate = pendingHostRate;
+        onlyResample = resampleOnly;
+        resampleOnly = false;
     }
 
     auto fail = [this] (const juce::String& message)
@@ -345,26 +376,57 @@ void ReferenceTrack::run()
     double fileRate = 0.0;
     juce::String readError;
     if (! readAudioFile (toLoad, audio, fileRate, readError, maxDurationSeconds))
-        return fail (readError);
-
-    progress.store (0.05f);
-
-    AnalysisSnapshot result;
-    const bool ok = analyseBuffer (audio, fileRate, result,
-                                   [this] (float p) { progress.store (0.05f + 0.85f * p); },
-                                   [this] { return threadShouldExit(); });
-    if (! ok)
     {
-        if (! threadShouldExit())
-            fail ("Analisi non riuscita");
-        return;
+        if (! onlyResample)
+            fail (readError);
+        return;   // nuovo sample rate ma file sparito: resta il buffer di prima
     }
 
-    std::lock_guard<std::mutex> lock (dataMutex);
-    snapshot = std::move (result);
-    sourceRate = fileRate;
-    sourceAudio = std::move (audio);
-    buildPlaybackBuffer (hostRate);
+    AnalysisSnapshot result;
+    if (! onlyResample)
+    {
+        progress.store (0.05f);
+        const bool ok = analyseBuffer (audio, fileRate, result,
+                                       [this] (float p) { progress.store (0.05f + 0.85f * p); },
+                                       [this] { return threadShouldExit(); });
+        if (! ok)
+        {
+            if (! threadShouldExit())
+                fail ("Analisi non riuscita");
+            return;
+        }
+    }
+
+    // ricampiona al sample rate dell'host; se nel frattempo è cambiato, si rifà con quello nuovo
+    for (;;)
+    {
+        double hostRate;
+        {
+            std::lock_guard<std::mutex> lock (dataMutex);
+            hostRate = pendingHostRate;
+        }
+        auto resampled = makePlaybackBuffer (audio, fileRate, hostRate);
+        if (threadShouldExit())
+            return;
+
+        {
+            const juce::SpinLock::ScopedLockType lock (playbackLock);
+            std::swap (playback, resampled);
+            playbackRate = hostRate;
+            playbackPos = onlyResample ? std::min (playbackPos, std::max (0, playback.getNumSamples() - 1)) : 0;
+        }
+
+        std::lock_guard<std::mutex> lock (dataMutex);
+        if (std::abs (pendingHostRate - hostRate) < 1e-6)
+            break;
+    }
+
+    if (! onlyResample)
+    {
+        loudestStart.store (findLoudestStart (result));
+        std::lock_guard<std::mutex> lock (dataMutex);
+        snapshot = std::move (result);
+    }
     progress.store (1.0f);
     state.store (State::ready);
 }
@@ -381,13 +443,30 @@ bool ReferenceTrack::renderPlayback (float* left, float* right, int numSamples, 
 
     for (int i = 0; i < numSamples; ++i)
     {
-        left[i] = srcL[playbackPos] * gain;
         if (right != nullptr)
+        {
+            left[i] = srcL[playbackPos] * gain;
             right[i] = srcR[playbackPos] * gain;
+        }
+        else
+        {
+            left[i] = 0.5f * (srcL[playbackPos] + srcR[playbackPos]) * gain;
+        }
         if (++playbackPos >= length)
             playbackPos = 0;
     }
     return true;
+}
+
+void ReferenceTrack::seekPlayback (double seconds) noexcept
+{
+    const juce::SpinLock::ScopedTryLockType lock (playbackLock);
+    if (! lock.isLocked() || playback.getNumSamples() == 0 || playbackRate <= 0.0)
+        return;
+
+    const auto length = (juce::int64) playback.getNumSamples();
+    const auto target = (juce::int64) std::llround (std::max (0.0, seconds) * playbackRate);
+    playbackPos = (int) (target % length);
 }
 
 } // namespace ma

@@ -504,19 +504,37 @@ void ReportPanel::FindingList::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    if (! e.mods.isPopupMenu() || item.finding.id.isEmpty() || item.finding.area == Area::none)
+    if (! e.mods.isPopupMenu() || item.type != ItemType::finding || owner.data == nullptr)
         return;
 
-    const auto id = item.finding.id;
-    const bool ignored = item.finding.ignored;
+    const auto& finding = item.finding;
+    const auto listen = monitorForFinding (finding, owner.data->comparison);
+    const bool canIgnore = finding.id.isNotEmpty() && finding.area != Area::none;
+    if (listen.mode == MonitorMode::off && ! canIgnore)
+        return;
+
+    const auto safe = juce::Component::SafePointer<ReportPanel> (&owner);
     juce::PopupMenu menu;
-    menu.addSectionHeader (item.finding.metric);
-    menu.addItem (ignored ? "Ripristina la diagnosi"_t : "Ignora: è una scelta voluta"_t,
-                  [safe = juce::Component::SafePointer<ReportPanel> (&owner), id, ignored]
-                  {
-                      if (safe != nullptr && safe->onIgnoreChanged)
-                          safe->onIgnoreChanged (id, ! ignored);
-                  });
+    menu.addSectionHeader (finding.metric);
+
+    // ascolta la parte del segnale che riguarda la diagnosi (nell'app, dal punto in cui è più evidente)
+    if (listen.mode != MonitorMode::off)
+        menu.addItem ("Ascolta il problema"_t + ": " + describeMonitor (listen), [safe, finding]
+                      {
+                          if (safe != nullptr && safe->onListen)
+                              safe->onListen (finding);
+                      });
+
+    if (canIgnore)
+    {
+        const auto id = finding.id;
+        const bool ignored = finding.ignored;
+        menu.addItem (ignored ? "Ripristina la diagnosi"_t : "Ignora: è una scelta voluta"_t, [safe, id, ignored]
+                      {
+                          if (safe != nullptr && safe->onIgnoreChanged)
+                              safe->onIgnoreChanged (id, ! ignored);
+                      });
+    }
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 

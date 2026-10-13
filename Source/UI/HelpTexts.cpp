@@ -111,6 +111,11 @@ namespace
             { "centroid",     "Centroide spettrale (Hz)\nIl baricentro delle frequenze: più è alto, più il suono è brillante." },
 
             // --- stereo -------------------------------------------------------------------------------------
+            { "monitor",      "Ascolta (monitor)\nCosa esce dal plugin. Stereo = il segnale normale. Mono = somma L+R: senti cosa "
+                              "cambia su uno smartphone o in un locale con impianto mono. Side = solo la differenza L-R: senti "
+                              "riverberi, allargamenti e cosa sparisce in mono. Clic su una banda dello spettro per ascoltarla da "
+                              "sola. L'analisi resta sul segnale originale; il monitor non si salva nel progetto, ma nella DAW "
+                              "va spento prima dell'export (un banner lo ricorda)." },
             { "goniometer",   "Goniometro\nMostra il campo stereo. Traccia verticale = mono (tutto al centro); nuvola larga = "
                               "stereo ampio; tendenza orizzontale = contenuto in controfase, che si annulla in mono." },
             { "correlation",  "Correlazione di fase (-1 .. +1)\n+1 = mono, 0 = canali scorrelati (stereo molto largo), sotto 0 "
@@ -194,7 +199,9 @@ namespace
 
             { "report:list","Diagnosi\nOgni scheda riporta valore, target, la spiegazione e cosa fare. In cima \"Da fare prima\": "
                               "al massimo 3 interventi nell'ordine in cui conviene affrontarli. Clic destro su una diagnosi per "
-                              "ignorarla quando è una scelta voluta: esce da voti e priorità e finisce in fondo, tra le ignorate." },
+                              "ignorarla quando è una scelta voluta: esce da voti e priorità e finisce in fondo, tra le ignorate. "
+                              "Dallo stesso menu \"Ascolta il problema\" isola la banda, il Side o la somma mono che la "
+                              "diagnosi riguarda (nell'app parte da 2 secondi prima del tratto segnalato)." },
         };
         return map;
     }
@@ -237,7 +244,7 @@ juce::String helpTextFor (const juce::String& key)
 
     if (prefix == "band" && juce::isPositiveAndBelow (index, kNumBands))
         return bandTitle (index) + "\nScostamento dell'energia della banda dal target, in dB: + sopra, - sotto. La fascia verde "_u
-               "è la tolleranza. Contenuto tipico: "_u + juce::String::fromUTF8 (bandContent (index)) + ".";
+               "è la tolleranza. Contenuto tipico: "_u + juce::String::fromUTF8 (bandContent (index)) + ". Clic per ascoltare solo questa banda.";
 
     if (key.startsWith ("album:band:"))
         if (const int b = key.getTrailingIntValue(); juce::isPositiveAndBelow (b, kNumBands))

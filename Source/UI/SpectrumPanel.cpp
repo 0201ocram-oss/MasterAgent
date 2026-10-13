@@ -89,6 +89,25 @@ void SpectrumPanel::mouseDown (const juce::MouseEvent& e)
 {
     if (viewToggle.contains (e.position) && onToggleMidSide)
         onToggleMidSide();
+
+    for (int b = 0; b < kNumBands; ++b)
+        if (bandCells[(size_t) b].contains (e.position) && onSoloBand)
+            onSoloBand (b);
+}
+
+juce::String SpectrumPanel::getTooltip()
+{
+    // fuori dalla guida: le bande dicono che si possono ascoltare da sole
+    if (data != nullptr && ! data->helpMode)
+    {
+        const auto p = getMouseXYRelative().toFloat();
+        for (int b = 0; b < kNumBands; ++b)
+            if (bandCells[(size_t) b].contains (p))
+                return data->monitor == MonitorChoice { MonitorMode::band, b }
+                           ? "Clic: torna all'ascolto normale"_t
+                           : "Clic: ascolta solo questa banda"_t + " (" + kBandNames[(size_t) b] + ")";
+    }
+    return Panel::getTooltip();
 }
 
 void SpectrumPanel::mouseExit (const juce::MouseEvent&)
@@ -596,9 +615,19 @@ void SpectrumPanel::drawBandDeltas (juce::Graphics& g, juce::Rectangle<float> r)
             g.drawText ((delta >= 0 ? "+" : "") + juce::String (delta, 1), valueLabel, juce::Justification::centred);
         }
 
-        g.setColour (hovered ? colours::text : colours::textDim);
-        g.setFont (hovered ? fonts::value (11.0f) : fonts::label (11.0f));
-        g.drawText (kBandNames[(size_t) b], label, juce::Justification::centred);
+        // banda in ascolto da sola (monitor)
+        const bool solo = d.monitor == MonitorChoice { MonitorMode::band, b };
+        if (solo)
+        {
+            g.setColour (colours::info.withAlpha (0.9f));
+            g.drawRoundedRectangle (cell.reduced (1.0f), 5.0f, 1.6f);
+            g.setColour (colours::info.withAlpha (0.25f));
+            g.fillRoundedRectangle (label.reduced (2.0f, 0.0f), 4.0f);
+        }
+
+        g.setColour (hovered || solo ? colours::text : colours::textDim);
+        g.setFont (hovered || solo ? fonts::value (11.0f) : fonts::label (11.0f));
+        g.drawFittedText (kBandNames[(size_t) b], label.toNearestInt(), juce::Justification::centred, 1, 0.8f);
     }
 }
 

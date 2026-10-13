@@ -288,6 +288,15 @@ int main (int argc, char* argv[])
             data.comparison = ma::compare (data.master, *data.profile);
         }
 
+        // monitor d'ascolto: Side dal selettore dello stereo, poi una banda isolata dallo spettro
+        {
+            data.monitor = { ma::MonitorMode::side, -1 };
+            render ("preview_monitor_side.png");
+            data.monitor = { ma::MonitorMode::band, 2 };
+            render ("preview_monitor_band.png");
+            data.monitor = {};
+        }
+
         // target broadcast (EBU R128): niente curva tonale, anteprima streaming solo indicativa
         {
             const auto* music = data.profile;

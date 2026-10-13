@@ -47,6 +47,14 @@ bool MasterAgentProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
 void MasterAgentProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
+    monitor.prepare (sampleRate);
+    abScratch.setSize (2, std::max (512, samplesPerBlock));
+    abMix = 0.0f;
+    abStep = (float) (1.0 / std::max (1.0, abFadeSeconds * sampleRate));
+    abWasOn = false;
+    expectedSongTime = -1.0e9;
+    playerWasPlaying = false;
+
     if (standalone)
     {
         player.prepare (sampleRate, samplesPerBlock);
@@ -78,23 +86,31 @@ void MasterAgentProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     {
         const bool playing = player.isPlaying();
         player.render (buffer);
+        if (buffer.getNumChannels() == 0)
+            return;
+
+        // il reference riparte dal punto giusto quando il brano parte o salta
+        bool resync = playing && ! playerWasPlaying;
+        playerWasPlaying = playing;
 
         // brano in ascolto: l'analisi dal vivo dà i valori istantanei della dashboard (anche durante l'A/B resta sul brano)
-        if (playing && buffer.getNumChannels() > 0)
+        if (playing)
         {
             // dopo un salto (clic sulla forma d'onda, nuovo brano) i meter ripartono da zero
             if (const int seeks = player.getSeekCount(); seeks != playbackSeeks)
             {
                 playbackSeeks = seeks;
                 liveAnalysis.requestReset();
+                resync = true;
             }
             liveAnalysis.push (buffer.getReadPointer (0), buffer.getNumChannels() > 1 ? buffer.getReadPointer (1) : nullptr,
                                buffer.getNumSamples());
         }
 
-        if (listenReference.load() && buffer.getNumChannels() > 0)
-            reference.renderPlayback (buffer.getWritePointer (0), buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr,
-                                      buffer.getNumSamples(), referenceGain.load());
+        const double blockStart = player.getPosition() - buffer.getNumSamples() / currentSampleRate;
+        renderReference (buffer, std::min (2, buffer.getNumChannels()), playing, resync, std::max (0.0, blockStart));
+        monitor.process (buffer.getWritePointer (0), buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr,
+                         buffer.getNumSamples());
         return;
     }
 
@@ -121,9 +137,18 @@ void MasterAgentProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     }
 
     // reset automatico quando la riproduzione riparte dall'inizio del brano
-    if (hasTransport && isPlaying && ! wasPlaying && autoResetOnPlay.load() && timeSeconds < 0.5)
+    const bool playStarted = hasTransport && isPlaying && ! wasPlaying;
+    if (playStarted && autoResetOnPlay.load() && timeSeconds < 0.5)
         liveAnalysis.requestReset();
     wasPlaying = isPlaying;
+
+    // salti e loop del transport: il reference si riallinea
+    bool jumped = false;
+    if (isPlaying && hasTime)
+    {
+        jumped = std::abs (timeSeconds - expectedSongTime) > 0.05;
+        expectedSongTime = timeSeconds + numSamples / currentSampleRate;
+    }
 
     // la posizione del transport serve a dire in che punto del brano si trova un problema
     const double songTime = (isPlaying && hasTime) ? timeSeconds : std::numeric_limits<double>::quiet_NaN();
@@ -133,14 +158,72 @@ void MasterAgentProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                            isNonRealtime(),   // export offline: attende l'analisi invece di perdere audio
                            songTime);
 
-    // ascolto A/B del reference: sostituisce l'uscita (l'analisi resta sul master).
-    // Se il reference non è disponibile il master passa inalterato.
-    if (listenReference.load())
-        reference.renderPlayback (buffer.getWritePointer (0), numChannels > 1 ? buffer.getWritePointer (1) : nullptr,
-                                  numSamples, referenceGain.load());
+    // ascolto A/B del reference: sostituisce l'uscita (l'analisi resta sul master). Senza transport suona sempre;
+    // con il transport fermo tace. Se il reference non è disponibile il master passa inalterato.
+    renderReference (buffer, numChannels, ! hasTransport || isPlaying, playStarted || jumped,
+                     hasTime ? timeSeconds : std::numeric_limits<double>::quiet_NaN());
+    monitor.process (buffer.getWritePointer (0), numChannels > 1 ? buffer.getWritePointer (1) : nullptr, numSamples);
 
     for (int ch = numChannels; ch < buffer.getNumChannels(); ++ch)
         buffer.clear (ch, 0, numSamples);
+}
+
+void MasterAgentProcessor::renderReference (juce::AudioBuffer<float>& buffer, int numChannels, bool running, bool resync,
+                                            double songTime) noexcept
+{
+    const bool wanted = listenReference.load() && reference.getState() == ma::ReferenceTrack::State::ready;
+    if (wanted && ! abWasOn)
+        resync = true;   // A/B appena attivato
+    abWasOn = wanted;
+
+    // A/B spento e dissolvenza finita: il master passa inalterato
+    if ((! wanted && abMix <= 0.0f) || abScratch.getNumSamples() == 0)
+        return;
+
+    if (wanted && resync && running)
+    {
+        switch ((AbPosition) abPosition.load())
+        {
+            case AbPosition::samePoint:
+                if (! std::isnan (songTime))
+                    reference.seekPlayback (songTime);
+                break;
+            case AbPosition::loudestSection:
+                reference.seekPlayback (reference.getLoudestStartSeconds());
+                break;
+            case AbPosition::resume:
+                break;
+        }
+    }
+
+    const int numSamples = buffer.getNumSamples();
+    const float gain = referenceGain.load();
+    const float target = wanted ? 1.0f : 0.0f;
+    auto* left = buffer.getWritePointer (0);
+    auto* right = numChannels > 1 ? buffer.getWritePointer (1) : nullptr;
+    auto* refL = abScratch.getWritePointer (0);
+    auto* refR = abScratch.getWritePointer (1);
+
+    for (int pos = 0; pos < numSamples; pos += abScratch.getNumSamples())
+    {
+        const int n = std::min (abScratch.getNumSamples(), numSamples - pos);
+        // a brano fermo il reference tace (e non avanza)
+        if (! running || ! reference.renderPlayback (refL, right != nullptr ? refR : nullptr, n, gain))
+        {
+            std::fill (refL, refL + n, 0.0f);
+            std::fill (refR, refR + n, 0.0f);
+        }
+
+        for (int i = 0; i < n; ++i)
+        {
+            if (abMix < target)      abMix = std::min (target, abMix + abStep);
+            else if (abMix > target) abMix = std::max (target, abMix - abStep);
+
+            left[pos + i] += (refL[i] - left[pos + i]) * abMix;
+            if (right != nullptr)
+                right[pos + i] += (refR[i] - right[pos + i]) * abMix;
+        }
+    }
 }
 
 void MasterAgentProcessor::setLiveMode (bool shouldBeLive, double windowSeconds)
@@ -552,6 +635,7 @@ void MasterAgentProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty ("onlyWhilePlaying", analyseOnlyWhilePlaying.load(), nullptr);
     state.setProperty ("liveMode", liveMode.load(), nullptr);
     state.setProperty ("abMatchLoudest", abMatchLoudestSection.load(), nullptr);
+    state.setProperty ("abPosition", abPosition.load(), nullptr);
     state.setProperty ("liveWindow", liveWindowSeconds.load(), nullptr);
     state.setProperty ("mixPhase", mixPhase.load(), nullptr);
     state.setProperty ("tonalLoudest", tonalLoudestSection.load(), nullptr);
@@ -579,6 +663,7 @@ void MasterAgentProcessor::setStateInformation (const void* data, int sizeInByte
     analyseOnlyWhilePlaying.store ((bool) state.getProperty ("onlyWhilePlaying", true));
     setLiveMode ((bool) state.getProperty ("liveMode", false), (double) state.getProperty ("liveWindow", 20.0));
     abMatchLoudestSection.store ((bool) state.getProperty ("abMatchLoudest", false));
+    abPosition.store (juce::jlimit (0, 2, (int) state.getProperty ("abPosition", 0)));
     mixPhase.store ((bool) state.getProperty ("mixPhase", false));
     tonalLoudestSection.store ((bool) state.getProperty ("tonalLoudest", false));
     editorWidth = (int) state.getProperty ("editorWidth", 1440);

@@ -98,6 +98,14 @@ Il selettore **L+R | M/S** in alto a sinistra sullo spettro passa alla vista Mid
 - Sotto 120 Hz le colonne arancio segnalano bassi troppo larghi (Side a meno di 6 dB dal Mid).
 - Il Side del reference (tratteggio viola) è portato al livello del master per confrontare la larghezza, non il volume.
 
+### Monitor d'ascolto: senti quello che dice il report
+Per capire a orecchio una diagnosi puoi ascoltare solo una parte del segnale:
+- **Ascolta: Stereo | Mono | Side** in alto a destra nel pannello Stereo. *Mono* è la somma L+R (cosa cambia su uno smartphone o un impianto mono); *Side* è solo la differenza L-R (riverberi, allargamenti, ciò che sparisce in mono). Di nuovo sullo stesso pulsante, o *Stereo*, per tornare all'ascolto normale.
+- **Una banda da sola**: clic su una banda sotto lo spettro (Sub, Bass, Low-mid...), con filtri Linkwitz-Riley da 24 dB/ottava; di nuovo clic per tornare.
+- **Ascolta il problema**: clic destro su una diagnosi. Le diagnosi di banda, le mosse EQ e le risonanze isolano la banda; larghezza, side sotto 100 Hz e correlazione passano al Side; la compatibilità mono al Mono. Nell'app l'ascolto parte da 2 secondi prima del tratto in cui il problema è più evidente.
+
+Il monitor cambia solo l'uscita: l'analisi resta sempre sul segnale originale. Si accende e si spegne con una breve dissolvenza, non viene salvato nel progetto (alla riapertura è spento) e un banner azzurro resta visibile finché è attivo: un clic sul banner lo spegne. **Nella DAW l'uscita del plugin non è il master: spegnilo prima dell'export.**
+
 ### Interazione
 - **Hover su una diagnosi** del report: l'elemento collegato si illumina sulla dashboard (valore, banda, riga o meter).
 - **Hover su una banda** (Sub, Bass, ...) o sullo spettro: la zona di frequenze si evidenzia, e un cursore mostra frequenza, livello e scostamento dal target.
@@ -124,7 +132,10 @@ Durante un render offline il plugin attende l'analisi invece di perdere audio. U
 ### Brano di riferimento
 - **Caricamento:** usa "Carica reference..." oppure trascina un file sulla finestra e scegli *Usa come brano di riferimento*. Formati: WAV, AIFF, FLAC, MP3, OGG, fino a 20 minuti. Trascinando più file insieme puoi crearne subito un profilo.
 - **Confronto:** il reference viene analizzato in background con lo stesso motore del master. Il confronto mostra la differenza per ogni metrica, la curva spettrale sovrapposta e la larghezza stereo per banda.
-- **Ascolta ref (A/B):** l'uscita del plugin diventa il reference, già allineato in loudness al tuo master, così il confronto a orecchio è onesto. Un banner viola resta visibile finché è attivo. **Disattivalo prima dell'export!**
+- **Ascolta ref (A/B):** l'uscita del plugin diventa il reference, già allineato in loudness al tuo master, così il confronto a orecchio è onesto. Un banner viola resta visibile finché è attivo (un clic sul banner lo spegne). **Disattivalo prima dell'export!**
+  - Il passaggio master ↔ reference è una dissolvenza di 30 ms, senza click.
+  - Il reference segue la riproduzione: nella DAW suona solo mentre il transport va (senza transport suona sempre), nell'app segue il lettore e in pausa tace.
+  - *Opzioni → Ascolto A/B → Posizione del reference*: da dove suona quando attivi l'A/B, quando parte la riproduzione e a ogni salto o loop. **Dallo stesso punto del brano** (default: ideale per confrontare due versioni dello stesso brano), **dal ritornello del reference** (la sua sezione più forte, poco prima che arrivi al massimo) oppure **da dove si era fermato**.
 - **Salva profilo:** trasforma l'analisi del reference in un profilo target riutilizzabile, salvato in `%APPDATA%\MasterAgent\profiles`.
 
 ### Profilo da più brani di riferimento
