@@ -162,6 +162,13 @@ float tonalToleranceForBand (const TargetProfile& profile, int band);
 float bandTonalDelta (const std::array<float, kNumThirdOctaves>& master,
                       const std::array<float, kNumThirdOctaves>& target, int band);
 
+/**
+    Scostamento di ogni banda dopo aver allineato il master al target sulla mediana degli scostamenti
+    63 Hz - 12.5 kHz: lo stesso calcolo di compare(). Serve agli strumenti che tarano i profili sui dati.
+*/
+std::array<float, kNumBands> alignedBandDeltas (const std::array<float, kNumThirdOctaves>& master,
+                                                const std::array<float, kNumThirdOctaves>& target);
+
 /** "1:32" */
 juce::String formatSongTime (float seconds);
 

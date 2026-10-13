@@ -28,6 +28,7 @@ void LoudnessMeter::prepare (double newSampleRate, int newNumChannels)
     sampleRate = newSampleRate;
     numChannels = std::clamp (newNumChannels, 1, 2);
     subBlockLength = std::max (1, (int) std::lround (sampleRate * 0.1));
+    fineLength = std::max (1, (int) std::lround (sampleRate * 0.01));
     designFilters();
     reset();
 }
@@ -77,6 +78,11 @@ void LoudnessMeter::reset()
     subBlockSum = 0.0;
     subBlockEnergies.fill (0.0);
     subBlocksWritten = 0;
+    fineCounter = 0;
+    fineSum = 0.0;
+    fineSums.fill (0.0);
+    finesWritten = 0;
+    momentaryRunning = shortTermRunning = 0.0;
 
     momentaryLufs = shortTermLufs = kSilenceDb;
     maxMomentaryLufs = maxShortTermLufs = kSilenceDb;
@@ -105,10 +111,43 @@ void LoudnessMeter::process (const float* left, const float* right, int numSampl
         }
 
         subBlockSum += sum;
+        fineSum += sum;
 
+        if (++fineCounter >= fineLength)
+            finishFineBlock();
         if (++subBlockCounter >= subBlockLength)
             finishSubBlock();
     }
+}
+
+void LoudnessMeter::finishFineBlock()
+{
+    // finestre scorrevoli di 40 (400 ms) e 300 (3 s) blocchi da 10 ms: somme aggiornate a ogni blocco
+    const auto index = (size_t) (finesWritten % kFinePerShortTerm);
+    const double leavingShortTerm = finesWritten >= kFinePerShortTerm ? fineSums[index] : 0.0;
+    const double leavingMomentary = finesWritten >= kFinePerMomentary
+                                  ? fineSums[(size_t) ((finesWritten - kFinePerMomentary) % kFinePerShortTerm)] : 0.0;
+    fineSums[index] = fineSum;
+    fineSum = 0.0;
+    fineCounter = 0;
+    ++finesWritten;
+
+    shortTermRunning += fineSums[index] - leavingShortTerm;
+    momentaryRunning += fineSums[index] - leavingMomentary;
+
+    // ogni 3 s le somme si ricalcolano da capo, così gli arrotondamenti non si accumulano
+    if (finesWritten % kFinePerShortTerm == 0)
+    {
+        shortTermRunning = std::accumulate (fineSums.begin(), fineSums.end(), 0.0);
+        momentaryRunning = 0.0;
+        for (int k = 0; k < kFinePerMomentary; ++k)
+            momentaryRunning += fineSums[(size_t) ((finesWritten - 1 - k) % kFinePerShortTerm)];
+    }
+
+    if (finesWritten >= kFinePerMomentary)
+        maxMomentaryLufs = std::max (maxMomentaryLufs, energyToLufs (std::max (0.0, momentaryRunning) / (kFinePerMomentary * (double) fineLength)));
+    if (finesWritten >= kFinePerShortTerm)
+        maxShortTermLufs = std::max (maxShortTermLufs, energyToLufs (std::max (0.0, shortTermRunning) / (kFinePerShortTerm * (double) fineLength)));
 }
 
 void LoudnessMeter::finishSubBlock()

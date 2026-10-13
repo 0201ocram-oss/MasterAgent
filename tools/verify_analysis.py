@@ -9,7 +9,7 @@ Uso:
 Il riferimento non riusa niente del codice C++:
 - loudness BS.1770-4 con i coefficienti K pubblicati dall'ITU a 48 kHz (gli altri sample rate vengono
   prima ricampionati a 48 kHz: la loudness di un segnale a banda limitata non cambia);
-- true peak con sovracampionamento polifase di scipy (4x come BS.1770, più 8x come stima del picco analogico);
+- true peak con sovracampionamento polifase di scipy a 16x (stima del picco analogico: l'app interpola tra i punti 4x);
 - LRA secondo EBU Tech 3342; DR con l'algoritmo TT (blocchi da 3 s, 20% più forti, secondo picco);
 - spettro e stereo da densità spettrali e cross-spettri di Welch.
 """
@@ -79,8 +79,9 @@ def loudness_measures(x, fs):
     return {
         "integratedLufs": integrated,
         "loudnessRange": lra,
-        "maxMomentaryLufs": float(np.max(lufs(m))) if len(m) else None,
-        "maxShortTermLufs": float(np.max(lufs(st))) if len(st) else None,
+        # massimi su una griglia da 10 ms, come l'app (EBU Tech 3341, casi 10 e 13)
+        "maxMomentaryLufs": float(np.max(lufs(window_energies(p, 19200, 480)))) if len(m) else None,
+        "maxShortTermLufs": float(np.max(lufs(window_energies(p, 144000, 480)))) if len(st) else None,
         "shortTermSeries": lufs(st),
     }
 
@@ -321,11 +322,12 @@ def verify(json_path):
     sp = 20 * np.log10(np.maximum(np.abs(x).max(axis=0), 1e-12))
     for ch in range(2):
         check(rows, f"Sample peak {'LR'[ch]}", m["samplePeakDb"][ch], float(sp[ch]), 0.01)
-    tp4, tp4_blocks = true_peak_blocks(x, fs, 4 if fs < 88000 else 2)
-    tp8, _ = true_peak_blocks(x, fs, 8 if fs < 88000 else 4)
+    # l'app stima il picco tra i punti sovracampionati: il riferimento è il sovracampionamento fitto (16x)
+    tp4, tp4_blocks = true_peak_blocks(x, fs, 16 if fs < 88000 else 8)
+    tp8 = tp4
     for ch in range(2):
-        check(rows, f"True peak {'LR'[ch]} (rif. 4x)", m["truePeakDb"][ch], float(tp4[ch]), 0.1)
-    check(rows, "True peak max (rif. 8x)", m["truePeakMaxDb"], float(tp8.max()), 0.25)
+        check(rows, f"True peak {'LR'[ch]} (rif. 16x)", m["truePeakDb"][ch], float(tp4[ch]), 0.05)
+    check(rows, "True peak max (rif. 16x)", m["truePeakMaxDb"], float(tp8.max()), 0.05)
 
     rms = 10 * math.log10(np.mean(x * x))
     check(rows, "RMS dB", m["rmsDb"], rms, 0.05)
@@ -408,7 +410,7 @@ def main():
         if clips:
             full = sum(1 for c in clips if c[3] == "fondo scala")
             print(f"  clip: {len(clips)} eventi ({full} a fondo scala, {len(clips) - full} plateau sotto il fondo scala)")
-        print(f"  true peak 4x {tp4.max():.2f} / 8x {tp8.max():.2f} dBTP")
+        print(f"  true peak (rif. 16x) {tp4.max():.2f} dBTP")
     print(f"\n{failures} misure fuori tolleranza")
     return 1 if failures else 0
 

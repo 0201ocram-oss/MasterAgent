@@ -143,7 +143,8 @@ if(MASTERAGENT_BUILD_TESTS)
         Tests/AlbumTests.cpp
         Tests/TimelineTests.cpp
         Tests/HtmlReportTests.cpp
-        Tests/MonitorTests.cpp)
+        Tests/MonitorTests.cpp
+        Tests/Tech3341Tests.cpp)
 
     target_include_directories(MasterAgentTests PRIVATE Source Tests)
 
@@ -214,7 +215,7 @@ endif()
 # ---------------------------------------------------------------------------
 if(MASTERAGENT_BUILD_TESTS)
     juce_add_console_app(MasterAgentAnalyze PRODUCT_NAME "MasterAgentAnalyze")
-    target_sources(MasterAgentAnalyze PRIVATE ${MASTERAGENT_CORE_SOURCES} tools/Analyze.cpp)
+    target_sources(MasterAgentAnalyze PRIVATE ${MASTERAGENT_CORE_SOURCES} tools/Analyze.cpp tools/Bench.cpp)
     target_include_directories(MasterAgentAnalyze PRIVATE Source)
     target_compile_definitions(MasterAgentAnalyze PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1)
     target_link_libraries(MasterAgentAnalyze PRIVATE

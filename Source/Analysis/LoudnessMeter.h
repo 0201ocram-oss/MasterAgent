@@ -57,6 +57,7 @@ public:
 private:
     void designFilters();
     void finishSubBlock();
+    void finishFineBlock();
 
     double sampleRate = 48000.0;
     int numChannels = 2;
@@ -69,6 +70,16 @@ private:
 
     std::array<double, 30> subBlockEnergies {};
     int subBlocksWritten = 0;
+
+    // Griglia fine da 10 ms solo per i massimi di momentary e short-term: sulla griglia da 100 ms dei blocchi di
+    // gating un evento breve (un colpo, una frase) si leggerebbe fino a ~0.5 dB sotto (EBU Tech 3341, casi 10 e 13).
+    static constexpr int kFinePerMomentary = 40, kFinePerShortTerm = 300;
+    int fineLength = 480;
+    int fineCounter = 0;
+    double fineSum = 0.0;
+    std::array<double, kFinePerShortTerm> fineSums {};   // somma dei quadrati pesati K di ogni blocco da 10 ms
+    long long finesWritten = 0;
+    double momentaryRunning = 0.0, shortTermRunning = 0.0;
 
     float momentaryLufs = kSilenceDb, shortTermLufs = kSilenceDb;
     float maxMomentaryLufs = kSilenceDb, maxShortTermLufs = kSilenceDb;

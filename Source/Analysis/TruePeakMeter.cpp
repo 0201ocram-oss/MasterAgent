@@ -77,6 +77,7 @@ void TruePeakMeter::reset()
         ch.history.assign ((size_t) tapsPerPhase * 2, 0.0);
         ch.writePos = 0;
         ch.above1 = ch.above0 = false;
+        ch.prev1 = ch.prev2 = 0.0;
     }
 
     truePeak = { 0.0, 0.0 };
@@ -100,9 +101,25 @@ float TruePeakMeter::processSample (ChannelState& state, double x) noexcept
 
     double peak = 0.0;
 
+    // Il picco reale sta quasi sempre tra due punti sovracampionati: a 4x un contenuto vicino a 20 kHz
+    // si legge fino a ~0.5 dB sotto. Attorno a ogni massimo locale una parabola sui tre punti stima il
+    // vertice (errore di pochi millesimi di dB con 4x); la correzione non supera mai 1/8 del dislivello.
+    auto consider = [&state, &peak] (double value) noexcept
+    {
+        const double a = state.prev2, m = state.prev1, c = std::abs (value);
+        if (m >= a && m >= c && m > 0.0)
+        {
+            const double curvature = 2.0 * m - a - c;
+            peak = std::max (peak, curvature > 1e-12 ? m + (c - a) * (c - a) / (8.0 * curvature) : m);
+        }
+        peak = std::max (peak, c);
+        state.prev2 = m;
+        state.prev1 = c;
+    };
+
     if (factor == 1)
     {
-        peak = std::abs (x);
+        consider (x);
     }
     else
     {
@@ -113,7 +130,7 @@ float TruePeakMeter::processSample (ChannelState& state, double x) noexcept
             // coeffs[k] moltiplica x[n - k] -> il più recente è window[tapsPerPhase - 1]
             for (int k = 0; k < tapsPerPhase; ++k)
                 acc += coeffs[k] * window[tapsPerPhase - 1 - k];
-            peak = std::max (peak, std::abs (acc));
+            consider (acc);
         }
     }
 

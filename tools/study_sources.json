@@ -1,0 +1,28 @@
+{
+  "_note": "Brani di riferimento per i profili misurati (tools/study.py). I percorsi sono relativi alla cartella del progetto; l'audio non è nel repository. role: reference = entra nei profili del genere; control = solo per i controlli (esempi estremi). files: filtro sui nomi (glob) quando una cartella contiene più album.",
+  "albums": [
+    { "path": "ExportDaCD/ACDC - BlackIce", "title": "AC/DC - Black Ice", "genre": "rock", "role": "reference", "year": 2008 },
+    { "path": "ExportDaCD/AVRIL LAVIGNE - Under my skin", "title": "Avril Lavigne - Under My Skin", "genre": "rock", "role": "reference", "year": 2004 },
+    { "path": "ExportDaCD/BLINK182 - Greatest hits", "title": "Blink-182 - Greatest Hits", "genre": "rock", "role": "reference", "year": 2005 },
+    { "path": "ExportDaCD/BON JOVI - Have a nice day", "title": "Bon Jovi - Have a Nice Day", "genre": "rock", "role": "reference", "year": 2005 },
+    { "path": "ExportDaCD/RED HOT CHILI PEPPERS - Stadium Arcadium", "title": "Red Hot Chili Peppers - Stadium Arcadium", "genre": "rock", "role": "reference", "year": 2006 },
+    { "path": "ExportDaCD/THE ROLLING STONES - A bigger bang", "title": "The Rolling Stones - A Bigger Bang", "genre": "rock", "role": "reference", "year": 2005 },
+    { "path": "ExportDaCD/TOOL - Lateralus", "title": "Tool - Lateralus", "genre": "rock", "role": "reference", "year": 2001 },
+    { "path": "MasterExample/rock", "title": "Dream Theater - Dream Theater", "genre": "rock", "role": "reference", "year": 2013 },
+
+    { "path": "ExportDaCD/ANASTACIA - Pieces of a dream", "title": "Anastacia - Pieces of a Dream", "genre": "pop", "role": "reference", "year": 2005 },
+    { "path": "ExportDaCD/SANTANA - All that i am", "title": "Santana - All That I Am", "genre": "pop", "role": "reference", "year": 2005 },
+    { "path": "MasterExample/pop", "files": "*Madonna*", "title": "Madonna - Confessions on a Dance Floor", "genre": "pop", "role": "reference", "year": 2005 },
+    { "path": "MasterExample/pop", "files": "*Levitating*", "title": "Dua Lipa - Levitating", "genre": "pop", "role": "reference", "year": 2020 },
+
+    { "path": "ExportDaCD/METALLICA - Death Magnetic", "title": "Metallica - Death Magnetic", "genre": "rock", "role": "control", "year": 2008,
+      "note": "controllo negativo: master tosato e schiacciato" },
+    { "path": "MasterExample/controlli", "title": "Sting - The Soul Cages", "genre": "pop", "role": "control", "year": 1991,
+      "note": "controllo dinamico: master prima della loudness war" },
+
+    { "path": "MasterExample/hiphop_trap", "title": "Hip-hop / Trap", "genre": "hiphop", "role": "reference", "year": 0,
+      "note": "cartella da riempire: un album per sottocartella o file con il nome dell'artista" },
+    { "path": "MasterExample/edm_club", "title": "EDM / Club", "genre": "edm", "role": "reference", "year": 0 },
+    { "path": "MasterExample/techno_house", "title": "Techno / House", "genre": "techno", "role": "reference", "year": 0 }
+  ]
+}

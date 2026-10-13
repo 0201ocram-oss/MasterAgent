@@ -471,6 +471,16 @@ namespace
     }
 }
 
+std::array<float, kNumBands> alignedBandDeltas (const std::array<float, kNumThirdOctaves>& master,
+                                                const std::array<float, kNumThirdOctaves>& target)
+{
+    const auto aligned = alignToTarget (master, target);
+    std::array<float, kNumBands> deltas {};
+    for (int b = 0; b < kNumBands; ++b)
+        deltas[(size_t) b] = bandTonalDelta (aligned, target, b);
+    return deltas;
+}
+
 ComparisonResult compare (const AnalysisSnapshot& s, const TargetProfile& profile, const CompareOptions& options)
 {
     ComparisonResult result;

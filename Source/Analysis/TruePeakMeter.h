@@ -12,6 +12,8 @@ namespace ma
     True Peak (dBTP) secondo ITU-R BS.1770-4 Annex 2.
     Oversampling polifase (4x sotto 96 kHz, 2x a 88.2/96 kHz, 1x sopra) con filtro sinc
     a finestra di Kaiser da 48 tap per fase: più accurato del filtro minimo a 12 tap della norma.
+    Il picco tra i punti sovracampionati si stima con una parabola: il valore resta entro pochi centesimi
+    di dB dal picco analogico anche con contenuto vicino a 20 kHz (con il solo 4x fino a ~0.5 dB sotto).
 */
 class TruePeakMeter
 {
@@ -40,6 +42,7 @@ private:
         std::vector<double> history;   // doppia lunghezza per evitare il wrap nel prodotto scalare
         int writePos = 0;
         bool above1 = false, above0 = false;
+        double prev1 = 0.0, prev2 = 0.0;   // ultimi due punti sovracampionati (valore assoluto)
     };
 
     float processSample (ChannelState& state, double x) noexcept;

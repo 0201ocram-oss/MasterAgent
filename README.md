@@ -159,8 +159,8 @@ Durante un render offline il plugin attende l'analisi invece di perdere audio. U
 | Streaming | Guadagno che applicheranno Spotify, Apple Music, YouTube, Tidal, Amazon e Deezer, con la loudness e il true peak risultanti |
 
 ### Note sulla precisione
-- Loudness e LRA sono verificati sui casi di test EBU Tech 3341/3342: scarto ≤ 0.1 LU per la loudness e ≤ 1 LU per l'LRA, a 44.1, 48 e 96 kHz.
-- Il true peak è verificato su sinusoidi a fs/4 con fase a 45°, il caso peggiore per gli inter-sample peak. Scarto ≤ 0.15 dB.
+- Loudness e LRA sono verificati sui casi di test EBU Tech 3341/3342 (edizione 2023): scarto ≤ 0.1 LU per la loudness e ≤ 1 LU per l'LRA, a 44.1, 48 e 96 kHz. Momentary e short-term massimi si calcolano ogni 10 ms (i blocchi di gating restano da 100 ms come vuole BS.1770): così anche un colpo o una frase brevi si leggono correttamente, come chiedono i casi 10 e 13 della norma.
+- True peak: sovracampionamento 4x (2x a 88.2/96 kHz) più una stima del vertice tra i punti sovracampionati, così il valore resta entro pochi centesimi di dB dal picco analogico anche con molte alte (con il solo 4x poteva leggere fino a ~0.5 dB sotto). Verificato con i casi 15-23 di Tech 3341 (+0.2/-0.4 dB) e su sinusoidi vicine a Nyquist con qualsiasi fase (≤ 0.05 dB).
 - **Le curve tonali dei profili di mercato sono medie di genere.** Rock e Pop (e i profili streaming, che usano la curva Pop) sono misurati su 150 master commerciali da CD (2001-2020): mediana per album, con una tolleranza per banda che lascia dentro l'85% dei brani. Hip-hop, EDM e Techno sono ancora modelli generici (pendenza, enfasi sui bassi, roll-off). Per un riferimento tonale affidabile usa un reference o un profilo creato da uno o più reference.
 - Le soglie stereo e tecniche sono tarate sugli stessi master: bilanciamento L/R da verificare oltre 1 dB (critico oltre 2), correlazione sotto 100 Hz da verificare sotto 0.70, DC offset oltre -50 dBFS, LRA al massimo "da verificare" perché dipende soprattutto dall'arrangiamento.
 - Sui profili streaming un master più forte del livello di normalizzazione è "da verificare", non critico: la piattaforma lo abbassa. Su Spotify, sopra -14 LUFS, il true peak consigliato è -2 dBTP.
@@ -187,6 +187,13 @@ Target disponibili:
   `build\MasterAgentHostTest_artefacts\Release\MasterAgentHostTest.exe build\MasterAgent_artefacts\Release\VST3\MasterAgent.vst3`
 
 I profili di mercato si rigenerano con `python tools/generate_profiles.py`.
+
+### Accuratezza: come si misura
+- **Misure**: `MasterAgentAnalyze --verify` più `python tools/verify_analysis.py` ricalcolano ogni misura con un'implementazione indipendente (numpy/scipy) e segnalano gli scarti oltre tolleranza.
+- **Profili misurati**: `python tools/study.py` analizza i brani di riferimento elencati in `tools/study_sources.json` (l'audio non è nel repository) e salva le misure in `tools/study_data/measurements.json`; `python tools/generate_profiles.py` ne ricava curve e tolleranze. Per misurare un genere nuovo basta mettere almeno due album in `MasterExample/<genere>/<album>/` e rilanciare i due comandi.
+- **Banco di prova delle diagnosi**: `python tools/bench.py` inserisce difetti noti (EQ, tilt, stereo, fase, clipping, limiting, DC, rumble, risonanze, sibilanti, eccessi in una sezione) in master commerciali e misura i falsi allarmi sugli originali, quanti difetti l'app trova e con che precisione (mosse EQ, tratti nel tempo). Ogni brano viene giudicato con il profilo del genere ricalcolato senza il suo album, come un mix nuovo. Il report va in `tools/bench_results/`.
+- **File ufficiali EBU**: `python tools/ebu_conformance.py` dopo aver estratto il Loudness Test Set (scaricato dal browser da tech.ebu.ch) in `external/ebu-loudness-test-set/`.
+- Gli strumenti scrivono i risultati intermedi in `%LOCALAPPDATA%\MasterAgent` (cambia con `MA_STUDY_CACHE`): l'antivirus può impedire a un eseguibile appena compilato di scrivere nella cartella del progetto.
 
 ## Struttura
 ```

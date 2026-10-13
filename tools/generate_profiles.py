@@ -15,8 +15,13 @@ Fonti e calibrazione:
 
 Rock e Pop (e i profili streaming, che usano la curva Pop) sono invece misurati su master commerciali da CD,
 analizzati con questo stesso motore (ottobre 2026): mediana per album, poi mediana tra gli album, levigata
-1-2-1 tra i terzi vicini. Rispetto al modello del paper sono più brillanti (tilt -1.4/-1.5 contro -2.3 dB/oct)
-e con meno low-mid. La tolleranza per banda lascia dentro l'85% dei brani, mai più stretta di quella generica.
+1-2-1 tra i terzi vicini da 31.5 Hz a 16 kHz. Rispetto al modello del paper sono più brillanti (tilt -1.4/-1.5
+contro -2.3 dB/oct) e con meno low-mid. La tolleranza per banda lascia dentro l'85% dei brani, mai più stretta
+di quella generica e al massimo 7 dB.
+Le curve si rigenerano dai brani (elenco in tools/study_sources.json):
+    python tools/study.py              misure per brano in tools/study_data/measurements.json
+    python tools/generate_profiles.py  questo script
+Hip-hop, EDM e Techno diventano misurati appena hanno almeno due album in MasterExample/<genere>/.
 - Rock: AC/DC "Black Ice", Avril Lavigne "Under My Skin", Blink-182 "Greatest Hits", Bon Jovi "Have a Nice Day",
   Red Hot Chili Peppers "Stadium Arcadium" (2 CD), The Rolling Stones "A Bigger Bang", Tool "Lateralus",
   Dream Theater "Dream Theater" (2001-2013, 109 brani).
@@ -79,13 +84,20 @@ def tilt(c):
     return (n * sxy - sx * sy) / (n * sxx - sx * sx)
 
 
-# curve misurate (vedi sopra) e tolleranza per banda Sub, Bass, Low-mid, Mid, High-mid, Presence, Brilliance, Air
-MEASURED_ROCK = [-29.96, -23.6, -14.55, -6.83, -1.52, 1.34, 2.85, 3.71, 4.13, 4.27, 3.54, 2.21, 1.52, 1.39, 1.54, 1.97,
-                 1.83, 1.14, 0.87, 1.03, 1.35, 1.27, 0.23, -1.24, -2.86, -4.63, -6.63, -8.95, -11.9, -17.02, -24.8]
-ROCK_BAND_TOLERANCE = [5.68, 2.88, 2.7, 2.5, 2.5, 2.75, 3.0, 5.5]
-MEASURED_POP = [-22.91, -19.34, -10.71, -3.2, 2.41, 4.8, 4.71, 3.9, 2.88, 2.17, 2.1, 2.18, 1.95, 1.72, 2.35, 3.46,
-                3.66, 2.82, 1.97, 1.29, 0.15, -1.22, -2.19, -3.18, -4.58, -5.65, -6.21, -7.72, -11.35, -17.23, -24.93]
-POP_BAND_TOLERANCE = [6.05, 2.88, 2.54, 3.0, 3.16, 2.75, 4.03, 7.0]
+# Curve misurate: si rigenerano dalle misure dei brani di riferimento (tools/study.py scrive
+# tools/study_data/measurements.json). Un genere con almeno due album di riferimento diventa misurato da solo.
+import profiles_lib
+
+TRACKS = profiles_lib.load_tracks()
+
+
+def measured(genre, model):
+    """Curva e tolleranza per banda misurate, se il genere ha abbastanza album; altrimenti il modello."""
+    tonal = profiles_lib.measured_tonal(TRACKS, genre) if TRACKS else None
+    if tonal is None:
+        return model, {}
+    print(f"{genre}: curva misurata su {tonal['tracks']} brani di {tonal['albums']} album")
+    return tonal["tonalCurve"], {"bandTolerance": tonal["bandTolerance"]}
 
 
 def m(lo, hi, target, warn):
@@ -97,54 +109,54 @@ def tilt_range(c):
     return m(round(t - 0.7, 2), round(t + 0.7, 2), t, 0.6)
 
 
-pop_curve = MEASURED_POP
-rock_curve = MEASURED_ROCK
-hiphop_curve = curve("hiphop", air_lift=1.5)
-edm_curve = curve("edm", air_lift=2.5)
-techno_curve = curve("techno", air_lift=1.5)
+pop_curve, pop_extra = measured("pop", curve("pop"))
+rock_curve, rock_extra = measured("rock", curve("rock"))
+hiphop_curve, hiphop_extra = measured("hiphop", curve("hiphop", air_lift=1.5))
+edm_curve, edm_extra = measured("edm", curve("edm", air_lift=2.5))
+techno_curve, techno_extra = measured("techno", curve("techno", air_lift=1.5))
 
 profiles = [
     ("streaming_generic", "Streaming (generico)", "Master bilanciato per tutte le piattaforme: -14 LUFS, -1 dBTP, dinamica preservata.",
      {"integratedLufs": m(-15, -12, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 9, 6, 2),
       "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5), "dr": m(7, 12, 9, 2)}, pop_curve,
-     {"context": "streaming", "normalizationLufs": -14, "bandTolerance": POP_BAND_TOLERANCE}),
+     {"context": "streaming", "normalizationLufs": -14, **pop_extra}),
     ("spotify", "Spotify", "Normalizzazione a -14 LUFS, true peak consigliato -1 dBTP (-2 se oltre -14 LUFS).",
      {"integratedLufs": m(-15, -13, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 9, 6, 2),
       "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5)}, pop_curve,
-     {"context": "streaming", "normalizationLufs": -14, "loudTruePeakMax": -2, "bandTolerance": POP_BAND_TOLERANCE}),
+     {"context": "streaming", "normalizationLufs": -14, "loudTruePeakMax": -2, **pop_extra}),
     ("apple_music", "Apple Music", "Sound Check a -16 LUFS, true peak -1 dBTP: premia i master più dinamici.",
      {"integratedLufs": m(-17, -14, -16, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 10, 7, 2),
       "plr": m(10, 15, 12, 2), "minPsr": m(8, 13, 10, 1.5)}, pop_curve,
-     {"context": "streaming", "normalizationLufs": -16, "bandTolerance": POP_BAND_TOLERANCE}),
+     {"context": "streaming", "normalizationLufs": -16, **pop_extra}),
     ("youtube", "YouTube", "Normalizza a -14 LUFS (solo in riduzione), true peak -1 dBTP.",
      {"integratedLufs": m(-15, -12, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 9, 6, 2),
       "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5)}, pop_curve,
-     {"context": "streaming", "normalizationLufs": -14, "bandTolerance": POP_BAND_TOLERANCE}),
+     {"context": "streaming", "normalizationLufs": -14, **pop_extra}),
     ("pop", "Pop commerciale", "Valori tipici delle release pop attuali (loudness da mercato, non da normalizzazione).",
      {"integratedLufs": m(-9, -6.5, -7.5, 1.5), "truePeakMax": m(-2, -0.3, -1, 0.5), "loudnessRange": m(3, 9, 5, 3),
       "plr": m(7, 10, 8.5, 1.5), "minPsr": m(6, 9, 7.5, 1.5), "dr": m(5, 9, 7, 1.5), "spectralTilt": tilt_range(pop_curve),
       "correlation": m(0.35, 0.9, 0.6, 0.15), "widthPercent": m(7, 25, 13, 6), "lowEndWidthPercent": m(0, 8, 2, 6)},
-     pop_curve, {"bandTolerance": POP_BAND_TOLERANCE}),
+     pop_curve, pop_extra),
     ("rock", "Rock", "Rock/alternative moderno: denso ma con più transiente sui medi.",
      {"integratedLufs": m(-10, -7, -8.5, 1.5), "truePeakMax": m(-2, -0.3, -1, 0.5), "loudnessRange": m(3, 10, 6, 3),
       "plr": m(8, 11, 9.5, 1.5), "minPsr": m(6.5, 10, 8, 1.5), "dr": m(6, 10, 8, 1.5), "spectralTilt": tilt_range(rock_curve),
       "correlation": m(0.3, 0.9, 0.55, 0.15), "widthPercent": m(9, 30, 16, 6), "lowEndWidthPercent": m(0, 10, 3, 6)},
-     rock_curve, {"bandTolerance": ROCK_BAND_TOLERANCE}),
+     rock_curve, rock_extra),
     ("hiphop_trap", "Hip-hop / Trap", "Sub-bass dominante (808), alto loudness, low-end mono.",
      {"integratedLufs": m(-9, -6, -7.5, 1.5), "truePeakMax": m(-2, -0.3, -1, 0.5), "loudnessRange": m(3, 7, 5, 2),
       "plr": m(7, 10, 8.5, 1.5), "minPsr": m(6, 9, 7.5, 1.5), "dr": m(5, 9, 7, 1.5), "spectralTilt": tilt_range(hiphop_curve),
       "correlation": m(0.4, 0.95, 0.65, 0.15), "widthPercent": m(10, 32, 20, 8), "lowEndWidthPercent": m(0, 5, 1, 5)},
-     hiphop_curve),
+     hiphop_curve, hiphop_extra),
     ("edm_club", "EDM / Club", "Master da club: molto denso, sub forte e mono, alte brillanti.",
      {"integratedLufs": m(-8, -5, -6.5, 1.5), "truePeakMax": m(-1.5, -0.1, -0.5, 0.5), "loudnessRange": m(2, 6, 4, 2),
       "plr": m(6, 9, 7.5, 1.5), "minPsr": m(5, 8, 6.5, 1.5), "dr": m(4, 8, 6, 1.5), "spectralTilt": tilt_range(edm_curve),
       "correlation": m(0.35, 0.9, 0.6, 0.15), "widthPercent": m(12, 38, 24, 8), "lowEndWidthPercent": m(0, 5, 1, 5)},
-     edm_curve),
+     edm_curve, edm_extra),
     ("techno_house", "Techno / House", "Kick e sub protagonisti, dinamica controllata ma transiente del kick preservato.",
      {"integratedLufs": m(-9, -6, -7.5, 1.5), "truePeakMax": m(-1.5, -0.1, -0.5, 0.5), "loudnessRange": m(2, 5, 3.5, 2),
       "plr": m(7, 10, 8.5, 1.5), "minPsr": m(6, 9, 7.5, 1.5), "dr": m(5, 9, 7, 1.5), "spectralTilt": tilt_range(techno_curve),
       "correlation": m(0.35, 0.9, 0.6, 0.15), "widthPercent": m(12, 38, 24, 8), "lowEndWidthPercent": m(0, 5, 1, 5)},
-     techno_curve),
+     techno_curve, techno_extra),
     # specifiche di consegna: solo loudness e true peak, senza curva tonale
     ("ebu_r128", "EBU R128 (TV e radio)", "Consegna broadcast europea: -23 LUFS ±0.5 LU, true peak max -1 dBTP. Fuori tolleranza il file non passa il QC.",
      {"integratedLufs": m(-23.5, -22.5, -23, 0.2), "truePeakMax": m(-6, -1, -1, 0.2)}, None, {"context": "broadcast"}),

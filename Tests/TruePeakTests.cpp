@@ -40,3 +40,23 @@ TEST_CASE ("True peak a 44.1 e 96 kHz", "[truepeak]")
         CHECK (test::analyse (b, sr).truePeakMaxDb == Approx (-6.0f).margin (0.15f));
     }
 }
+
+TEST_CASE ("True peak: picco tra i punti sovracampionati (alte vicine a Nyquist)", "[truepeak]")
+{
+    // a 0.4 fs i punti 4x distano 0.63 rad: senza stima del vertice il picco si legge fino a 0.43 dB sotto
+    for (double sr : { 44100.0, 48000.0, 96000.0 })
+        for (int k = 0; k < 7; ++k)
+        {
+            const double phase = juce::MathConstants<double>::pi * (double) k / 7.0;
+            auto b = test::sine (0.4 * std::min (sr, 48000.0), -6.0, 1.0, 2, sr, phase);
+            // inizio e fine dolci: un attacco brusco di una sinusoide così acuta ha un picco reale più alto (Gibbs)
+            const int fade = (int) (0.02 * sr);
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                b.applyGainRamp (ch, 0, fade, 0.0f, 1.0f);
+                b.applyGainRamp (ch, b.getNumSamples() - fade, fade, 1.0f, 0.0f);
+            }
+            INFO ("sample rate " << sr << ", fase " << k);
+            CHECK (test::analyse (b, sr).truePeakMaxDb == Approx (-6.0f).margin (0.05f));
+        }
+}

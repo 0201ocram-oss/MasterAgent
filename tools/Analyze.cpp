@@ -13,9 +13,17 @@
 //       per tools/verify_analysis.py: salva l'audio decodificato (WAV float) e misure, cronologia, segni
 //       e diagnosi (tutti i profili, fase mix e master) in JSON, da confrontare con un calcolo indipendente
 //       (MA_VERIFY_NO_WAV=1 salva solo il JSON)
+//   MasterAgentAnalyze --study <out.json> [--snapshots <cartella>] <file audio> [...]
+//       misure compatte per la pipeline dei profili misurati (tools/study.py), più gli snapshot per il banco di prova
+//   MasterAgentAnalyze --band-deltas <in.json> <out.json>
+//       scostamenti di banda di molte curve da un target, con l'allineamento di compare() (tools/generate_profiles.py)
+//   MasterAgentAnalyze --bench <jobs.json> <cartella>   /   --bench-list
+//       banco di prova: difetti noti inseriti in master commerciali (tools/bench.py, tools/bench_report.py)
 // Utile per calibrare i profili su master commerciali e per provare i consigli su un mix.
 
+#include "Bench.h"
 #include "Analysis/ReferenceAnalyzer.h"
+#include "Analysis/SnapshotIO.h"
 #include "Analysis/Timeline.h"
 #include "Compare/AlbumCheck.h"
 #include "Compare/Comparator.h"
@@ -345,8 +353,153 @@ namespace
     }
 }
 
+namespace
+{
+    /**
+        --study <out.json> [--snapshots <cartella>] <file>...: misure compatte di ogni brano per la pipeline dei profili
+        (tools/study.py) e, con --snapshots, lo snapshot completo per i profili "senza un album" del banco di prova.
+    */
+    int study (int argc, char* argv[])
+    {
+        if (argc < 4)
+        {
+            std::printf ("Uso: MasterAgentAnalyze --study <out.json> [--snapshots <cartella>] <file> [...]\n");
+            return 1;
+        }
+
+        const juce::File out (juce::String::fromUTF8 (argv[2]));
+        int first = 3;
+        juce::File snapshotDir;
+        if (argc > 4 && juce::String (argv[3]) == "--snapshots")
+        {
+            snapshotDir = juce::File (juce::String::fromUTF8 (argv[4]));
+            snapshotDir.createDirectory();
+            first = 5;
+        }
+
+        juce::Array<juce::var> tracks;
+        for (int a = first; a < argc; ++a)
+        {
+            const juce::File file (juce::String::fromUTF8 (argv[a]));
+            ma::AnalysisSnapshot s;
+            juce::String error;
+            if (! ma::analyseFile (file, s, error) || s.integratedLufs <= -70.0f)
+            {
+                std::printf ("Saltato %s: %s\n", file.getFileName().toRawUTF8(), error.isNotEmpty() ? error.toRawUTF8() : "silenzio");
+                continue;
+            }
+
+            auto* t = new juce::DynamicObject();
+            t->setProperty ("file", file.getFullPathName());
+            t->setProperty ("sampleRate", s.sampleRate);
+            t->setProperty ("seconds", s.secondsAnalyzed);
+            t->setProperty ("integratedLufs", toVar (s.integratedLufs));
+            t->setProperty ("maxShortTermLufs", toVar (s.maxShortTermLufs));
+            t->setProperty ("maxMomentaryLufs", toVar (s.maxMomentaryLufs));
+            t->setProperty ("truePeakMaxDb", toVar (s.truePeakMaxDb));
+            t->setProperty ("samplePeakMaxDb", toVar (std::max (s.samplePeakDb[0], s.samplePeakDb[1])));
+            t->setProperty ("loudnessRange", toVar (s.loudnessRange));
+            t->setProperty ("plr", toVar (s.plr));
+            t->setProperty ("minPsr", toVar (s.minPsr));
+            t->setProperty ("drValue", s.drValid ? toVar (s.drValue) : juce::var());
+            t->setProperty ("thirdOctaveDb", toVarArray (s.thirdOctaveDb));
+            t->setProperty ("thirdOctaveLoudestDb", s.loudestSectionSeconds > 0.0f ? toVarArray (s.thirdOctaveLoudestDb) : juce::var());
+            t->setProperty ("loudestSectionSeconds", toVar (s.loudestSectionSeconds));
+            t->setProperty ("bandEnergyDb", toVarArray (s.bandEnergyDb));
+            t->setProperty ("spectralTilt", toVar (s.spectralTiltDbPerOct));
+            t->setProperty ("subRumbleDb", toVar (s.subRumbleDb));
+            t->setProperty ("ultraHighDb", toVar (s.ultraHighDb));
+            t->setProperty ("widthPercent", toVar (s.widthPercent));
+            t->setProperty ("bandWidthPercent", toVarArray (s.bandWidthPercent));
+            t->setProperty ("bandCorrelation", toVarArray (s.bandCorrelation));
+            t->setProperty ("correlation", toVar (s.correlation));
+            t->setProperty ("lowEndWidthPercent", toVar (s.lowEndWidthPercent));
+            t->setProperty ("lowEndCorrelation", toVar (s.lowEndCorrelation));
+            t->setProperty ("balanceDb", toVar (s.balanceDb));
+            t->setProperty ("monoLossDb", toVar (s.monoLossDb));
+            t->setProperty ("bandCrestDb", toVarArray (s.bandCrestDb));
+            juce::Array<juce::var> burst;
+            for (const auto& d : s.bandDynamics)
+                burst.add (toVar (d.burstDb));
+            t->setProperty ("bandBurstDb", burst);
+            t->setProperty ("clipEvents", s.clipEvents);
+            t->setProperty ("clipEventsFullScale", s.clipEventsFullScale);
+            t->setProperty ("longCeilingClips", s.longCeilingClips);
+
+            if (snapshotDir != juce::File())
+            {
+                const auto snap = snapshotDir.getChildFile (juce::String::toHexString (file.getFullPathName().hashCode64()) + ".snap");
+                const auto data = ma::saveSnapshot (s);
+                if (snap.replaceWithData (data.getData(), data.getSize()))
+                    t->setProperty ("snapshot", snap.getFullPathName());
+            }
+
+            tracks.add (juce::var (t));
+            std::printf ("%s  %.1f LUFS\n", file.getFileName().toRawUTF8(), s.integratedLufs);
+            std::fflush (stdout);
+        }
+
+        if (! out.replaceWithText (juce::JSON::toString (juce::var (tracks), true)))
+        {
+            std::printf ("Impossibile scrivere %s\n", out.getFullPathName().toRawUTF8());
+            return 1;
+        }
+        return 0;
+    }
+
+    /**
+        --band-deltas <in.json> <out.json>: scostamenti di banda di molte curve rispetto a un target, con lo stesso
+        allineamento di compare(). in.json: [ { "target": [31 valori], "curves": [ [31 valori], ... ] }, ... ]
+        out.json: [ [ [8 valori], ... ], ... ] nello stesso ordine.
+    */
+    int bandDeltas (int argc, char* argv[])
+    {
+        if (argc != 4)
+        {
+            std::printf ("Uso: MasterAgentAnalyze --band-deltas <in.json> <out.json>\n");
+            return 1;
+        }
+
+        auto toCurve = [] (const juce::var& v, std::array<float, ma::kNumThirdOctaves>& c)
+        {
+            const auto* a = v.getArray();
+            if (a == nullptr || a->size() != ma::kNumThirdOctaves)
+                return false;
+            for (int i = 0; i < ma::kNumThirdOctaves; ++i)
+                c[(size_t) i] = (float) (double) (*a)[i];
+            return true;
+        };
+
+        const auto requests = juce::JSON::parse (juce::File (juce::String::fromUTF8 (argv[2])));
+        if (! requests.isArray())
+            return 1;
+
+        juce::Array<juce::var> results;
+        for (const auto& request : *requests.getArray())
+        {
+            std::array<float, ma::kNumThirdOctaves> target {}, curve {};
+            juce::Array<juce::var> deltas;
+            if (toCurve (request["target"], target))
+                if (const auto* curves = request["curves"].getArray())
+                    for (const auto& c : *curves)
+                        deltas.add (toCurve (c, curve) ? toVarArray (ma::alignedBandDeltas (curve, target)) : juce::var());
+            results.add (deltas);
+        }
+
+        return juce::File (juce::String::fromUTF8 (argv[3])).replaceWithText (juce::JSON::toString (juce::var (results), true)) ? 0 : 1;
+    }
+}
+
 int main (int argc, char* argv[])
 {
+    if (argc > 1 && juce::String (argv[1]) == "--study")
+        return study (argc, argv);
+    if (argc > 1 && juce::String (argv[1]) == "--band-deltas")
+        return bandDeltas (argc, argv);
+    if (argc > 1 && juce::String (argv[1]) == "--bench")
+        return runBench (argc, argv);
+    if (argc > 1 && juce::String (argv[1]) == "--bench-list")
+        return listBenchVariants();
     if (argc > 1 && juce::String (argv[1]) == "--verify")
         return verify (argc, argv);
     if (argc > 1 && juce::String (argv[1]) == "--make-profile")
