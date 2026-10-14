@@ -315,7 +315,7 @@ namespace
         if (key == metric::truePeakMax)
             return { (broadcast ? "True peak oltre il massimo dello standard %1 (%2 dBTP): il file non passa il controllo tecnico (QC) del broadcaster."_t
                                 : "True peak oltre il massimo consigliato per i podcast (%2 dBTP): la codifica MP3/AAC delle app può distorcere."_t)
-                         .replace ("%1", profile.name).replace ("%2", fmt (range.max, 1)),
+                         .replace ("%1", profile.getDeliveryName()).replace ("%2", fmt (range.max, 1)),
                      "Limiter true peak (con oversampling) come ultimo elemento della catena, ceiling a %1 dBTP."_t.replace ("%1", fmt (range.max, 1)) };
 
         const float gain = range.target - value;
@@ -324,14 +324,14 @@ namespace
         if (gain < 0.0f)
             return { (broadcast ? "Più forte dello standard %1: il file non passa il controllo tecnico (QC) del broadcaster, che lo rifiuta o lo abbassa d'ufficio."_t
                                 : "Più forte dello standard podcast: non tutte le app normalizzano, e tra un episodio e l'altro chi ascolta deve correggere il volume."_t)
-                         .replace ("%1", profile.name),
+                         .replace ("%1", profile.getDeliveryName()),
                      "Abbassa il guadagno di circa %1 dB (normalizzazione a %2 LUFS): basta un guadagno, il limiter non serve."_t
                          .replace ("%1", gainText).replace ("%2", targetText) };
 
         Advice advice;
         advice.message = (broadcast ? "Più basso dello standard %1: il file non passa il controllo tecnico (QC) del broadcaster."_t
                                     : "Più basso dello standard podcast: in auto o in cuffia, in ambienti rumorosi, la voce si perde rispetto agli altri programmi."_t)
-                             .replace ("%1", profile.name);
+                             .replace ("%1", profile.getDeliveryName());
         const float peakAfter = truePeak + gain;
         if (peakAfter <= truePeakLimit)
         {

@@ -13,7 +13,7 @@ Fonti e calibrazione:
   gli altri generi sono derivati con più o meno sub.
 - Aria: il dataset comprende decenni di produzioni; i generi moderni hanno un leggero lift sopra i 10 kHz.
 
-Rock e Pop (e i profili streaming, che usano la curva Pop) sono invece misurati su master commerciali da CD,
+Rock e Pop sono invece misurati su master commerciali da CD,
 analizzati con questo stesso motore (ottobre 2026): mediana per album, poi mediana tra gli album, levigata
 1-2-1 tra i terzi vicini da 31.5 Hz a 16 kHz. Rispetto al modello del paper sono più brillanti (tilt -1.4/-1.5
 contro -2.3 dB/oct) e con meno low-mid. La tolleranza per banda lascia dentro l'85% dei brani, mai più stretta
@@ -33,7 +33,13 @@ prassi attuale, perché quei CD sono dell'epoca della loudness war.
 Le curve restano indicative: per un riferimento preciso usa un brano di riferimento o un profilo creato
 da uno (pulsante "Salva profilo" nel plugin).
 
-Broadcast e podcast ("context": "broadcast" / "podcast") sono specifiche di consegna, senza curva tonale:
+Generi e consegne ("kind"): il plugin compone il target da un genere e una consegna (TargetProfile.cpp, composeTarget).
+- Genere: come deve suonare il master (curva tonale, stereo, LRA, tilt). Loudness e dinamica dei generi sono quelle
+  dei master forti per CD e club: le usa la consegna "Master forte" ("dynamicsFromGenre").
+- Consegna: dove andrà il master (integrated, true peak, PLR, PSR, DR), senza curva tonale.
+  Piattaforme streaming ("context": "streaming") con la loro normalizzazione, broadcast e podcast sotto.
+
+Broadcast e podcast ("context": "broadcast" / "podcast") sono specifiche di consegna:
 - EBU R128 (2020): -23 LUFS, scarto ammesso ±0.5 LU (±1 LU solo per la diretta), true peak max -1 dBTP.
 - ATSC A/85 (2013): -24 LKFS, tolleranza ±2 dB usata per il CALM Act, true peak max -2 dBTP.
 - Podcast: Apple Podcasts -16 LKFS ±1 dB, true peak max -1 dBTP; AES TD1004.1.15-10 indica -16 LUFS come massimo.
@@ -116,54 +122,60 @@ edm_curve, edm_extra = measured("edm", curve("edm", air_lift=2.5))
 techno_curve, techno_extra = measured("techno", curve("techno", air_lift=1.5))
 
 profiles = [
+    # consegna "Master forte": loudness e dinamica le dà il genere (con un reference: "Come il reference")
+    ("loud", "Master forte (CD, club)", "Loudness e dinamica tipiche del genere, per CD, club e download: nessuna normalizzazione.",
+     {}, None, {"kind": "delivery", "shortName": "Master forte", "dynamicsFromGenre": True}),
     ("streaming_generic", "Streaming (generico)", "Master bilanciato per tutte le piattaforme: -14 LUFS, -1 dBTP, dinamica preservata.",
-     {"integratedLufs": m(-15, -12, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 9, 6, 2),
-      "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5), "dr": m(7, 12, 9, 2)}, pop_curve,
-     {"context": "streaming", "normalizationLufs": -14, **pop_extra}),
+     {"integratedLufs": m(-15, -12, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5),
+      "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5), "dr": m(7, 12, 9, 2)}, None,
+     {"kind": "delivery", "shortName": "Streaming", "context": "streaming", "normalizationLufs": -14}),
     ("spotify", "Spotify", "Normalizzazione a -14 LUFS, true peak consigliato -1 dBTP (-2 se oltre -14 LUFS).",
-     {"integratedLufs": m(-15, -13, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 9, 6, 2),
-      "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5)}, pop_curve,
-     {"context": "streaming", "normalizationLufs": -14, "loudTruePeakMax": -2, **pop_extra}),
+     {"integratedLufs": m(-15, -13, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5),
+      "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5)}, None,
+     {"kind": "delivery", "context": "streaming", "normalizationLufs": -14, "loudTruePeakMax": -2}),
     ("apple_music", "Apple Music", "Sound Check a -16 LUFS, true peak -1 dBTP: premia i master più dinamici.",
-     {"integratedLufs": m(-17, -14, -16, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 10, 7, 2),
-      "plr": m(10, 15, 12, 2), "minPsr": m(8, 13, 10, 1.5)}, pop_curve,
-     {"context": "streaming", "normalizationLufs": -16, **pop_extra}),
+     {"integratedLufs": m(-17, -14, -16, 2), "truePeakMax": m(-6, -1, -1, 0.5),
+      "plr": m(10, 15, 12, 2), "minPsr": m(8, 13, 10, 1.5)}, None,
+     {"kind": "delivery", "context": "streaming", "normalizationLufs": -16}),
     ("youtube", "YouTube", "Normalizza a -14 LUFS (solo in riduzione), true peak -1 dBTP.",
-     {"integratedLufs": m(-15, -12, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5), "loudnessRange": m(4, 9, 6, 2),
-      "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5)}, pop_curve,
-     {"context": "streaming", "normalizationLufs": -14, **pop_extra}),
+     {"integratedLufs": m(-15, -12, -14, 2), "truePeakMax": m(-6, -1, -1, 0.5),
+      "plr": m(9, 14, 11, 2), "minPsr": m(7, 12, 9, 1.5)}, None,
+     {"kind": "delivery", "context": "streaming", "normalizationLufs": -14}),
     ("pop", "Pop commerciale", "Valori tipici delle release pop attuali (loudness da mercato, non da normalizzazione).",
      {"integratedLufs": m(-9, -6.5, -7.5, 1.5), "truePeakMax": m(-2, -0.3, -1, 0.5), "loudnessRange": m(3, 9, 5, 3),
       "plr": m(7, 10, 8.5, 1.5), "minPsr": m(6, 9, 7.5, 1.5), "dr": m(5, 9, 7, 1.5), "spectralTilt": tilt_range(pop_curve),
       "correlation": m(0.35, 0.9, 0.6, 0.15), "widthPercent": m(7, 25, 13, 6), "lowEndWidthPercent": m(0, 8, 2, 6)},
-     pop_curve, pop_extra),
+     pop_curve, {"kind": "genre", "shortName": "Pop", **pop_extra}),
     ("rock", "Rock", "Rock/alternative moderno: denso ma con più transiente sui medi.",
      {"integratedLufs": m(-10, -7, -8.5, 1.5), "truePeakMax": m(-2, -0.3, -1, 0.5), "loudnessRange": m(3, 10, 6, 3),
       "plr": m(8, 11, 9.5, 1.5), "minPsr": m(6.5, 10, 8, 1.5), "dr": m(6, 10, 8, 1.5), "spectralTilt": tilt_range(rock_curve),
       "correlation": m(0.3, 0.9, 0.55, 0.15), "widthPercent": m(9, 30, 16, 6), "lowEndWidthPercent": m(0, 10, 3, 6)},
-     rock_curve, rock_extra),
+     rock_curve, {"kind": "genre", **rock_extra}),
     ("hiphop_trap", "Hip-hop / Trap", "Sub-bass dominante (808), alto loudness, low-end mono.",
      {"integratedLufs": m(-9, -6, -7.5, 1.5), "truePeakMax": m(-2, -0.3, -1, 0.5), "loudnessRange": m(3, 7, 5, 2),
       "plr": m(7, 10, 8.5, 1.5), "minPsr": m(6, 9, 7.5, 1.5), "dr": m(5, 9, 7, 1.5), "spectralTilt": tilt_range(hiphop_curve),
       "correlation": m(0.4, 0.95, 0.65, 0.15), "widthPercent": m(10, 32, 20, 8), "lowEndWidthPercent": m(0, 5, 1, 5)},
-     hiphop_curve, hiphop_extra),
+     hiphop_curve, {"kind": "genre", "shortName": "Hip-hop", **hiphop_extra}),
     ("edm_club", "EDM / Club", "Master da club: molto denso, sub forte e mono, alte brillanti.",
      {"integratedLufs": m(-8, -5, -6.5, 1.5), "truePeakMax": m(-1.5, -0.1, -0.5, 0.5), "loudnessRange": m(2, 6, 4, 2),
       "plr": m(6, 9, 7.5, 1.5), "minPsr": m(5, 8, 6.5, 1.5), "dr": m(4, 8, 6, 1.5), "spectralTilt": tilt_range(edm_curve),
       "correlation": m(0.35, 0.9, 0.6, 0.15), "widthPercent": m(12, 38, 24, 8), "lowEndWidthPercent": m(0, 5, 1, 5)},
-     edm_curve, edm_extra),
+     edm_curve, {"kind": "genre", "shortName": "EDM", **edm_extra}),
     ("techno_house", "Techno / House", "Kick e sub protagonisti, dinamica controllata ma transiente del kick preservato.",
      {"integratedLufs": m(-9, -6, -7.5, 1.5), "truePeakMax": m(-1.5, -0.1, -0.5, 0.5), "loudnessRange": m(2, 5, 3.5, 2),
       "plr": m(7, 10, 8.5, 1.5), "minPsr": m(6, 9, 7.5, 1.5), "dr": m(5, 9, 7, 1.5), "spectralTilt": tilt_range(techno_curve),
       "correlation": m(0.35, 0.9, 0.6, 0.15), "widthPercent": m(12, 38, 24, 8), "lowEndWidthPercent": m(0, 5, 1, 5)},
-     techno_curve, techno_extra),
+     techno_curve, {"kind": "genre", "shortName": "Techno", **techno_extra}),
     # specifiche di consegna: solo loudness e true peak, senza curva tonale
     ("ebu_r128", "EBU R128 (TV e radio)", "Consegna broadcast europea: -23 LUFS ±0.5 LU, true peak max -1 dBTP. Fuori tolleranza il file non passa il QC.",
-     {"integratedLufs": m(-23.5, -22.5, -23, 0.2), "truePeakMax": m(-6, -1, -1, 0.2)}, None, {"context": "broadcast"}),
+     {"integratedLufs": m(-23.5, -22.5, -23, 0.2), "truePeakMax": m(-6, -1, -1, 0.2)}, None,
+     {"kind": "delivery", "shortName": "EBU R128", "context": "broadcast"}),
     ("atsc_a85", "ATSC A/85 (TV USA)", "Consegna broadcast USA: -24 LKFS ±2 dB, true peak max -2 dBTP. Fuori tolleranza il file non passa il QC.",
-     {"integratedLufs": m(-26, -22, -24, 0.2), "truePeakMax": m(-6, -2, -2, 0.2)}, None, {"context": "broadcast"}),
+     {"integratedLufs": m(-26, -22, -24, 0.2), "truePeakMax": m(-6, -2, -2, 0.2)}, None,
+     {"kind": "delivery", "shortName": "ATSC A/85", "context": "broadcast"}),
     ("podcast", "Podcast", "-16 LUFS ±1 LU, true peak max -1 dBTP (Apple Podcasts, AES TD1004).",
-     {"integratedLufs": m(-17, -15, -16, 1), "truePeakMax": m(-6, -1, -1, 0.5)}, None, {"context": "podcast"}),
+     {"integratedLufs": m(-17, -15, -16, 1), "truePeakMax": m(-6, -1, -1, 0.5)}, None,
+     {"kind": "delivery", "context": "podcast"}),
 ]
 
 outdir = os.path.join(os.path.dirname(__file__), "..", "Resources", "profiles")
@@ -176,6 +188,6 @@ for pid, name, desc, metrics, tonal, *extra in profiles:
     with open(os.path.join(outdir, pid + ".json"), "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     if tonal is None:
-        print(f"{pid:18s} {data['context']}")
+        print(f"{pid:18s} consegna {data.get('context', 'music')}")
     else:
         print(f"{pid:18s} tilt {tilt(tonal):6.2f}  sub(31.5/40/50) {tonal[2]:6.1f} {tonal[3]:6.1f} {tonal[4]:6.1f}  63 {tonal[5]:5.1f}  125 {tonal[8]:5.1f}  1k {tonal[17]:5.1f}  10k {tonal[27]:6.1f}")

@@ -16,5 +16,6 @@
       "warn": 0.5
     }
   },
+  "kind": "delivery",
   "context": "podcast"
 }

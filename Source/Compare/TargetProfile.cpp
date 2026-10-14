@@ -1,5 +1,6 @@
 #include "TargetProfile.h"
 #include "Comparator.h"
+#include "../Common/Text.h"
 
 #include "MasterAgentProfiles.h"
 
@@ -151,6 +152,14 @@ std::optional<TargetProfile> TargetProfile::fromJson (const juce::String& json)
     else if (context == "music")     p.context = ProfileContext::music;
     else                             p.context = p.normalizationLufs ? ProfileContext::streaming : ProfileContext::music;
 
+    // profili salvati prima della scelta genere × consegna: le piattaforme, broadcast e podcast sono consegne
+    const auto kind = root.getProperty ("kind", {}).toString();
+    if (kind == "delivery")    p.kind = ProfileKind::delivery;
+    else if (kind == "genre")  p.kind = ProfileKind::genre;
+    else                       p.kind = p.context == ProfileContext::music ? ProfileKind::genre : ProfileKind::delivery;
+    p.shortName = root.getProperty ("shortName", {}).toString();
+    p.dynamicsFromGenre = p.kind == ProfileKind::delivery && (bool) root.getProperty ("dynamicsFromGenre", false);
+
     p.tonalCurveLoudest = readArray<kNumThirdOctaves> (root, "tonalCurveLoudest");
     p.bandTolerance = readArray<kNumBands> (root, "bandTolerance");
     p.bandWidthTolerances = readArray<kNumBands> (root, "bandWidthTolerances");
@@ -168,7 +177,12 @@ juce::String TargetProfile::toJson() const
     auto* root = new juce::DynamicObject();
     root->setProperty ("id", id);
     root->setProperty ("name", name);
+    if (shortName.isNotEmpty())
+        root->setProperty ("shortName", shortName);
     root->setProperty ("description", description);
+    root->setProperty ("kind", kind == ProfileKind::delivery ? "delivery" : "genre");
+    if (dynamicsFromGenre)
+        root->setProperty ("dynamicsFromGenre", true);
     root->setProperty ("isReference", isReference);
 
     auto* m = new juce::DynamicObject();
@@ -343,6 +357,92 @@ TargetProfile TargetProfile::fromSnapshots (const std::vector<AnalysisSnapshot>&
 }
 
 //==============================================================================
+bool isDeliveryMetric (const juce::String& key)
+{
+    // il crest per banda cala con il limiting quanto PLR e PSR: con un reference forte e una consegna
+    // streaming segnalerebbe "troppo transiente" su un master giustamente meno limitato
+    return key == metric::integratedLufs || key == metric::truePeakMax || key == metric::plr || key == metric::minPsr
+        || key == metric::dr || key == metric::crestLow || key == metric::crestMid || key == metric::crestHigh;
+}
+
+juce::String composedShortName (const TargetProfile* genre, const TargetProfile& delivery)
+{
+    if (genre == nullptr)
+        return delivery.getShortName();
+    // un reference (o un profilo creato da reference) con "Master forte": tutto viene da lui, come prima
+    if (delivery.dynamicsFromGenre && genre->isReference)
+        return genre->getShortName();
+    return genre->getShortName() + " · "_u + delivery.getShortName();
+}
+
+TargetProfile composeTarget (const TargetProfile* genre, const TargetProfile& delivery)
+{
+    const auto dot = " · "_u;
+    const bool allFromGenre = genre != nullptr && delivery.dynamicsFromGenre;
+
+    TargetProfile t;
+    if (genre != nullptr)
+    {
+        t = *genre;   // suono: curve, tolleranze, larghezze, raffiche, sorgenti
+        if (! allFromGenre)
+        {
+            t.metrics.clear();
+            for (const auto& [key, range] : genre->metrics)
+                if (! isDeliveryMetric (key))
+                    t.metrics[key] = range;
+        }
+    }
+
+    if (! allFromGenre)
+    {
+        // senza genere valgono tutte le specifiche della consegna, come i vecchi profili broadcast e podcast
+        for (const auto& [key, range] : delivery.metrics)
+            if (genre == nullptr || isDeliveryMetric (key))
+                t.metrics[key] = range;
+        t.normalizationLufs = delivery.normalizationLufs;
+        t.loudTruePeakMax = delivery.loudTruePeakMax;
+        t.context = delivery.context;
+        t.deliveryName = delivery.name;
+    }
+
+    t.kind = ProfileKind::genre;
+    t.dynamicsFromGenre = false;
+    t.shortName = composedShortName (genre, delivery);
+    if (genre == nullptr)
+    {
+        t.id = delivery.id;
+        t.name = delivery.name;
+        t.description = delivery.description;
+    }
+    else if (allFromGenre)
+    {
+        t.id = genre->id;
+        t.name = genre->isReference ? genre->name : genre->name + dot + delivery.name;
+        t.description = genre->description;
+    }
+    else
+    {
+        t.id = genre->id + "+" + delivery.id;
+        t.name = genre->name + dot + delivery.name;
+        t.description = genre->description.isNotEmpty() ? genre->description + " " + delivery.description : delivery.description;
+    }
+    return t;
+}
+
+TargetSelection migrateTargetId (const ProfileLibrary& library, const juce::String& oldId)
+{
+    if (const auto* p = library.find (oldId, ProfileKind::delivery))
+    {
+        if (p->isDeliveryStandard())
+            return { targetIds::noGenre, oldId };
+        return { targetIds::defaultGenre, oldId };   // le piattaforme usavano la curva Pop
+    }
+    if (oldId.isEmpty())
+        return { targetIds::defaultGenre, targetIds::defaultDelivery };
+    return { oldId, targetIds::loud };
+}
+
+//==============================================================================
 ProfileLibrary::ProfileLibrary()
 {
     reload();
@@ -388,6 +488,12 @@ const TargetProfile* ProfileLibrary::findById (const juce::String& id) const
         if (p.id == id)
             return &p;
     return nullptr;
+}
+
+const TargetProfile* ProfileLibrary::find (const juce::String& id, ProfileKind kind) const
+{
+    const auto* p = findById (id);
+    return p != nullptr && p->kind == kind ? p : nullptr;
 }
 
 bool ProfileLibrary::saveUserProfile (const TargetProfile& profile, juce::String& error)

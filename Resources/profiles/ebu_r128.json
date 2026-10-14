@@ -16,5 +16,7 @@
       "warn": 0.2
     }
   },
+  "kind": "delivery",
+  "shortName": "EBU R128",
   "context": "broadcast"
 }

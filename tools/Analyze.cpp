@@ -1,17 +1,19 @@
 // Analizza file audio con lo stesso motore del plugin e stampa bilanciamento tonale, mosse EQ e diagnosi.
 // Uso:
 //   MasterAgentAnalyze <file audio> [<file audio> ...]
-//       variabili d'ambiente: MA_PROFILE (id del profilo, default pop), MA_PHASE (mix | master, default master)
+//       variabili d'ambiente: MA_PROFILE (genere, default pop), MA_DELIVERY (consegna: loud, spotify, ebu_r128...;
+//       senza, MA_PROFILE accetta anche i vecchi id unici), MA_PROFILE_FILE (profilo da file), MA_PHASE (mix | master)
 //   MasterAgentAnalyze --make-profile "<nome>" <out.json> <file audio> <file audio> [...]
 //       crea un profilo da più brani di riferimento (target = media, tolleranze = dispersione tra i brani)
 //   MasterAgentAnalyze --album <file audio> <file audio> [...]
 //       coerenza album: ogni brano confrontato con la mediana dell'album (stampa il report testuale;
 //       con MA_HTML=<out.html> salva anche il report HTML)
 //   MasterAgentAnalyze --html <out.html> <file audio>
-//       report HTML del brano, come l'export del plugin (profilo e fase da MA_PROFILE / MA_PHASE)
+//       report HTML del brano, come l'export del plugin (target e fase da MA_PROFILE / MA_DELIVERY / MA_PHASE)
 //   MasterAgentAnalyze --verify <cartella> <file audio> [...]
 //       per tools/verify_analysis.py: salva l'audio decodificato (WAV float) e misure, cronologia, segni
-//       e diagnosi (tutti i profili, fase mix e master) in JSON, da confrontare con un calcolo indipendente
+//       e diagnosi (combinazioni genere × consegna, fase mix e master, con i range usati) in JSON, da confrontare
+//       con un calcolo indipendente
 //       (MA_VERIFY_NO_WAV=1 salva solo il JSON)
 //   MasterAgentAnalyze --study <out.json> [--snapshots <cartella>] <file audio> [...]
 //       misure compatte per la pipeline dei profili misurati (tools/study.py), più gli snapshot per il banco di prova
@@ -207,6 +209,30 @@ namespace
         return writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());
     }
 
+    /**
+        Combinazioni genere × consegna controllate da --verify: ogni genere come master forte, Pop e Rock con
+        ogni consegna, broadcast e podcast anche senza genere.
+    */
+    std::vector<ma::TargetProfile> verifyTargets (const ma::ProfileLibrary& lib)
+    {
+        std::vector<ma::TargetProfile> targets;
+        const auto* loud = lib.find (ma::targetIds::loud, ma::ProfileKind::delivery);
+        for (const auto& p : lib.getProfiles())
+            if (p.kind == ma::ProfileKind::genre && loud != nullptr)
+                targets.push_back (ma::composeTarget (&p, *loud));
+        for (const auto& d : lib.getProfiles())
+        {
+            if (d.kind != ma::ProfileKind::delivery || d.dynamicsFromGenre)
+                continue;
+            for (const auto* genreId : { "pop", "rock" })
+                if (const auto* genre = lib.find (genreId, ma::ProfileKind::genre))
+                    targets.push_back (ma::composeTarget (genre, d));
+            if (d.isDeliveryStandard())
+                targets.push_back (ma::composeTarget (nullptr, d));
+        }
+        return targets;
+    }
+
     int verify (int argc, char* argv[])
     {
         if (argc < 4)
@@ -218,6 +244,7 @@ namespace
         const juce::File outDir (juce::String::fromUTF8 (argv[2]));
         outDir.createDirectory();
         ma::ProfileLibrary lib;
+        const auto targets = verifyTargets (lib);
         // MA_VERIFY_NO_WAV=1: solo JSON (studi su molti brani, dove il WAV float occuperebbe decine di GB)
         const bool noWav = juce::SystemStats::getEnvironmentVariable ("MA_VERIFY_NO_WAV", {}).isNotEmpty();
 
@@ -293,11 +320,12 @@ namespace
             t->setProperty ("clips", clips);
             t->setProperty ("dropouts", dropouts);
 
-            // per ogni profilo, fase mix e master: diagnosi, voto e segni con le soglie usate dall'editor
+            // per ogni target genere × consegna, fase mix e master: diagnosi, voto e segni con le soglie usate dall'editor
             auto* perProfile = new juce::DynamicObject();
-            for (const auto& p : lib.getProfiles())
+            for (const auto& p : targets)
             {
                 auto* entry = new juce::DynamicObject();
+                entry->setProperty ("profile", juce::JSON::parse (p.toJson()));   // i range usati, per verify_findings.py
                 for (auto phase : { ma::WorkPhase::mix, ma::WorkPhase::master })
                 {
                     ma::CompareOptions options;
@@ -490,6 +518,43 @@ namespace
     }
 }
 
+namespace
+{
+    /**
+        Target dalle variabili d'ambiente, come nel plugin: MA_PROFILE è il genere e MA_DELIVERY la consegna.
+        Senza MA_DELIVERY, MA_PROFILE può essere anche un vecchio id unico (spotify -> Pop · Spotify,
+        ebu_r128 -> solo specifiche, rock -> Rock · Master forte). MA_PROFILE_FILE: profilo da un file JSON
+        (es. creato con --make-profile), senza installarlo, al posto del genere o della consegna secondo il tipo.
+    */
+    std::optional<ma::TargetProfile> targetFromEnvironment (const ma::ProfileLibrary& lib)
+    {
+        const auto profileId = juce::SystemStats::getEnvironmentVariable ("MA_PROFILE", ma::targetIds::defaultGenre);
+        const auto deliveryId = juce::SystemStats::getEnvironmentVariable ("MA_DELIVERY", {});
+        const auto selection = deliveryId.isNotEmpty() ? ma::TargetSelection { profileId, deliveryId }
+                                                       : ma::migrateTargetId (lib, profileId);
+
+        std::optional<ma::TargetProfile> fileProfile;
+        if (const auto path = juce::SystemStats::getEnvironmentVariable ("MA_PROFILE_FILE", {}); path.isNotEmpty())
+            if (! (fileProfile = ma::TargetProfile::fromJson (juce::File (path).loadFileAsString())))
+                return std::nullopt;
+
+        const bool fileIsGenre = fileProfile && fileProfile->kind == ma::ProfileKind::genre;
+        const bool fileIsDelivery = fileProfile && fileProfile->kind == ma::ProfileKind::delivery;
+
+        const ma::TargetProfile* genre = fileIsGenre ? &*fileProfile : nullptr;
+        if (! fileIsGenre && selection.genre != ma::targetIds::noGenre)
+            if ((genre = lib.find (selection.genre, ma::ProfileKind::genre)) == nullptr)
+                return std::nullopt;
+
+        // un profilo da file usato da solo vale per intero, come prima (consegna "Master forte")
+        const auto deliveryWanted = fileIsGenre && deliveryId.isEmpty() ? ma::targetIds::loud : selection.delivery;
+        const auto* delivery = fileIsDelivery ? &*fileProfile : lib.find (deliveryWanted, ma::ProfileKind::delivery);
+        if (delivery == nullptr)
+            return std::nullopt;
+        return ma::composeTarget (genre, *delivery);
+    }
+}
+
 int main (int argc, char* argv[])
 {
     if (argc > 1 && juce::String (argv[1]) == "--study")
@@ -508,22 +573,13 @@ int main (int argc, char* argv[])
         return checkAlbum (argc, argv);
 
     ma::ProfileLibrary lib;
-    const auto profileId = juce::SystemStats::getEnvironmentVariable ("MA_PROFILE", "pop");
-    const auto* profile = lib.findById (profileId);
-
-    // MA_PROFILE_FILE: profilo da un file JSON (es. creato con --make-profile), senza installarlo
-    std::optional<ma::TargetProfile> fileProfile;
-    if (const auto path = juce::SystemStats::getEnvironmentVariable ("MA_PROFILE_FILE", {}); path.isNotEmpty())
-    {
-        fileProfile = ma::TargetProfile::fromJson (juce::File (path).loadFileAsString());
-        profile = fileProfile ? &*fileProfile : nullptr;
-    }
-
-    if (profile == nullptr)
+    const auto target = targetFromEnvironment (lib);
+    if (! target)
     {
         std::printf ("Profilo non trovato.\n");
         return 1;
     }
+    const auto* profile = &*target;
 
     ma::CompareOptions options;
     options.phase = juce::SystemStats::getEnvironmentVariable ("MA_PHASE", "master").equalsIgnoreCase ("mix") ? ma::WorkPhase::mix

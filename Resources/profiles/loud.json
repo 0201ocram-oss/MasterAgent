@@ -1,0 +1,9 @@
+{
+  "id": "loud",
+  "name": "Master forte (CD, club)",
+  "description": "Loudness e dinamica tipiche del genere, per CD, club e download: nessuna normalizzazione.",
+  "metrics": {},
+  "kind": "delivery",
+  "shortName": "Master forte",
+  "dynamicsFromGenre": true
+}

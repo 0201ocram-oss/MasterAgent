@@ -4,7 +4,8 @@ Coerenza tra misure, diagnosi, voto e segni sulla forma d'onda, per ogni profilo
 Uso (dopo MasterAgentAnalyze --verify <cartella> ...):
     python tools/verify_findings.py <cartella>
 
-Controlla regole che devono valere sempre, qualunque sia il brano:
+Per ogni target genere × consegna (con i range usati, scritti da --verify) controlla regole che devono valere
+sempre, qualunque sia il brano:
 - severità di ogni metrica del profilo = posizione del valore rispetto a min/max/warn del profilo, con le
   eccezioni dell'app (LRA mai critico; loudness oltre il riferimento di una piattaforma che normalizza al massimo
   "attenzione"; PLR/PSR gonfiati dai picchi inter-campione solo informativi; true peak per i master forti su Spotify);
@@ -84,7 +85,8 @@ def check_track(meta):
     name = Path(meta["file"]).name
 
     for pid, entry in meta["profiles"].items():
-        prof = PROFILES.get(pid)
+        # i range del target composto (genere × consegna) arrivano con i risultati; i JSON vecchi usano i profili
+        prof = entry.get("profile") or PROFILES.get(pid)
         if prof is None:
             continue
         for phase in ("mix", "master"):

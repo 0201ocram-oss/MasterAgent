@@ -97,5 +97,7 @@
     -16.2,
     -18.82
   ],
-  "tonalTolerance": 2.5
+  "tonalTolerance": 2.5,
+  "kind": "genre",
+  "shortName": "Hip-hop"
 }

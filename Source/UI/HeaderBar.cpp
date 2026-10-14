@@ -45,12 +45,39 @@ void IconButton::paintButton (juce::Graphics& g, bool isMouseOver, bool isButton
     g.strokePath (p, juce::PathStrokeType (1.8f, juce::PathStrokeType::mitered, juce::PathStrokeType::square));
 }
 
+void TargetButton::paintButton (juce::Graphics& g, bool isMouseOver, bool isButtonDown)
+{
+    // come i menu a tendina del tema: fondo, bordo, testo a sinistra e freccia a destra
+    auto& lf = getLookAndFeel();
+    const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
+    const auto fill = lf.findColour (juce::ComboBox::backgroundColourId);
+    g.setColour (isButtonDown ? hoverTint (fill, 0.1f) : isMouseOver ? hoverTint (fill, 0.05f) : fill);
+    g.fillRoundedRectangle (bounds, 7.0f);
+    g.setColour (colours::line);
+    g.drawRoundedRectangle (bounds, 7.0f, 1.0f);
+
+    juce::Path arrow;
+    const float cx = (float) getWidth() - 16.0f, cy = getHeight() * 0.5f;
+    arrow.startNewSubPath (cx - 4.0f, cy - 2.0f);
+    arrow.lineTo (cx, cy + 2.5f);
+    arrow.lineTo (cx + 4.0f, cy - 2.0f);
+    g.setColour (colours::textDim);
+    g.strokePath (arrow, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    g.setColour (lf.findColour (juce::ComboBox::textColourId));
+    g.setFont (juce::Font (juce::FontOptions (13.5f)));
+    g.drawFittedText (getButtonText(), getLocalBounds().withTrimmedLeft (10).withTrimmedRight (30),
+                      juce::Justification::centredLeft, 1, 0.8f);
+}
+
 //==============================================================================
 HeaderBar::HeaderBar()
 {
-    addAndMakeVisible (targetBox);
-    targetBox.onChange = [this] { if (onTargetChanged) onTargetChanged (getSelectedTargetId()); };
-    targetBox.setTooltip ("Standard di confronto: genere musicale, piattaforma streaming, broadcast e podcast o brano di riferimento"_t);
+    addAndMakeVisible (targetButton);
+    targetButton.onClick = [this] { showTargetMenu(); };
+    targetButton.setTooltip ("Target in due parti. Genere: come deve suonare il master (curva tonale, stereo, LRA), da un genere, "
+                             "da un brano di riferimento o da un tuo profilo. Consegna: dove andrà (loudness, true peak e dinamica): "
+                             "master forte per CD e club, una piattaforma streaming, broadcast o podcast."_t);
 
     // selettore di modalità a segmenti
     for (auto* b : { &wholeSongButton, &liveButton })
@@ -179,7 +206,7 @@ void HeaderBar::resized()
     auto r = getLocalBounds().reduced (16, 12);
     r.removeFromLeft (160);   // logo
 
-    targetBox.setBounds (r.removeFromLeft (184));
+    targetButton.setBounds (r.removeFromLeft (184));
     r.removeFromLeft (groupGap);
     if (standalone)
     {
@@ -226,31 +253,46 @@ void HeaderBar::resized()
     refStatus.setBounds (r);
 }
 
-void HeaderBar::setTargets (const std::vector<TargetItem>& items, const juce::String& selectedId)
+void HeaderBar::setTargets (const std::vector<TargetItem>& genres, const std::vector<TargetItem>& deliveries,
+                            const ma::TargetSelection& selected, const juce::String& label)
 {
-    targetBox.clear (juce::dontSendNotification);
-    targetIds.clear();
-
-    // le intestazioni non contano negli indici delle voci, che restano allineati a targetIds
-    int itemId = 1;
-    juce::String group;
-    for (const auto& item : items)
-    {
-        if (item.group != group && item.group.isNotEmpty())
-            targetBox.addSectionHeading (item.group);
-        group = item.group;
-        targetBox.addItem (item.name, itemId++);
-        targetIds.add (item.id);
-    }
-
-    const int index = targetIds.indexOf (selectedId);
-    targetBox.setSelectedItemIndex (std::max (0, index), juce::dontSendNotification);
+    genreItems = genres;
+    deliveryItems = deliveries;
+    selectedTarget = selected;
+    targetButton.setButtonText (label);
 }
 
-juce::String HeaderBar::getSelectedTargetId() const
+void HeaderBar::showTargetMenu (juce::Component* parent)
 {
-    const int index = targetBox.getSelectedItemIndex();
-    return juce::isPositiveAndBelow (index, targetIds.size()) ? targetIds[index] : juce::String();
+    juce::PopupMenu menu;
+    const auto addSection = [&] (const juce::String& heading, const std::vector<TargetItem>& items, bool genre)
+    {
+        menu.addSectionHeader (heading);
+        juce::String group = items.empty() ? juce::String() : items.front().group;
+        for (const auto& item : items)
+        {
+            if (item.group != group)
+                menu.addSeparator();
+            group = item.group;
+
+            const auto& current = genre ? selectedTarget.genre : selectedTarget.delivery;
+            menu.addItem (item.name, item.enabled, item.id == current, [safe = juce::Component::SafePointer<HeaderBar> (this), id = item.id, genre]
+            {
+                if (safe == nullptr)
+                    return;
+                auto choice = safe->selectedTarget;
+                (genre ? choice.genre : choice.delivery) = id;
+                if (! (choice == safe->selectedTarget) && safe->onTargetChanged)
+                    safe->onTargetChanged (choice);
+            });
+        }
+    };
+
+    addSection ("Genere: come deve suonare"_t, genreItems, true);
+    addSection ("Consegna: loudness, picchi e dinamica"_t, deliveryItems, false);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (targetButton)
+                                                  .withMinimumWidth (targetButton.getWidth())
+                                                  .withParentComponent (parent));
 }
 
 void HeaderBar::setReferenceStatus (const juce::String& text, juce::Colour colour, bool referenceReady, bool hasReference)

@@ -2,6 +2,7 @@
 #include "Compare/Comparator.h"
 #include "Compare/ReportExporter.h"
 #include "Compare/TargetProfile.h"
+#include "Common/Text.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -11,21 +12,31 @@ using Catch::Approx;
 TEST_CASE ("Tutti i profili inclusi vengono caricati", "[profiles]")
 {
     ma::ProfileLibrary lib;
-    int builtIn = 0, delivery = 0;
+    int builtIn = 0, deliveries = 0, standards = 0;
     for (const auto& p : lib.getProfiles())
     {
         if (p.id.startsWith ("user_"))
             continue;
         ++builtIn;
         INFO (p.id.toStdString());
-        // broadcast e podcast sono specifiche di consegna: loudness e true peak, senza curva tonale
-        CHECK (p.tonalCurve.has_value() != p.isDeliveryStandard());
-        CHECK (p.getMetric (ma::metric::integratedLufs) != nullptr);
-        CHECK (p.getMetric (ma::metric::truePeakMax) != nullptr);
-        delivery += p.isDeliveryStandard() ? 1 : 0;
+        // il suono lo decide il genere: le consegne (piattaforme, broadcast, podcast) non hanno una curva tonale
+        const bool delivery = p.kind == ma::ProfileKind::delivery;
+        CHECK (p.tonalCurve.has_value() == ! delivery);
+        // tutti fissano loudness e true peak, tranne "Master forte", che li prende dal genere
+        CHECK ((p.getMetric (ma::metric::integratedLufs) != nullptr) == ! p.dynamicsFromGenre);
+        CHECK ((p.getMetric (ma::metric::truePeakMax) != nullptr) == ! p.dynamicsFromGenre);
+        // l'LRA dipende dall'arrangiamento: è del genere
+        CHECK ((p.getMetric (ma::metric::loudnessRange) != nullptr) == ! delivery);
+        deliveries += delivery ? 1 : 0;
+        standards += p.isDeliveryStandard() ? 1 : 0;
     }
-    CHECK (builtIn == 12);
-    CHECK (delivery == 3);
+    CHECK (builtIn == 13);
+    CHECK (deliveries == 8);
+    CHECK (standards == 3);
+    REQUIRE (lib.find (ma::targetIds::loud, ma::ProfileKind::delivery) != nullptr);
+    CHECK (lib.find (ma::targetIds::loud, ma::ProfileKind::delivery)->dynamicsFromGenre);
+    CHECK (lib.find ("rock", ma::ProfileKind::delivery) == nullptr);
+    CHECK (lib.find ("spotify", ma::ProfileKind::genre) == nullptr);
     CHECK (lib.findById ("spotify") != nullptr);
     CHECK (lib.findById ("spotify")->context == ma::ProfileContext::streaming);
     CHECK (lib.findById ("rock")->context == ma::ProfileContext::music);
@@ -46,6 +57,23 @@ TEST_CASE ("Contesto del profilo: lettura, default e round-trip JSON", "[profile
     REQUIRE (podcast.has_value());
     CHECK (podcast->isDeliveryStandard());
     CHECK (ma::TargetProfile::fromJson (podcast->toJson())->context == ma::ProfileContext::podcast);
+
+    // tipo: senza campo, chi ha un contesto di consegna (streaming, broadcast, podcast) è una consegna
+    CHECK (parse (R"({"id":"a","name":"A","normalizationLufs":-14})")->kind == ma::ProfileKind::delivery);
+    CHECK (parse (R"({"id":"b","name":"B"})")->kind == ma::ProfileKind::genre);
+    CHECK (podcast->kind == ma::ProfileKind::delivery);
+    CHECK (parse (R"({"id":"d","name":"D","kind":"genre","normalizationLufs":-14})")->kind == ma::ProfileKind::genre);
+    // "dynamicsFromGenre" vale solo per le consegne
+    CHECK_FALSE (parse (R"({"id":"e","name":"E","dynamicsFromGenre":true})")->dynamicsFromGenre);
+
+    const auto loud = parse (R"({"id":"f","name":"F lungo","shortName":"F","kind":"delivery","dynamicsFromGenre":true})");
+    REQUIRE (loud.has_value());
+    const auto again = ma::TargetProfile::fromJson (loud->toJson());
+    REQUIRE (again.has_value());
+    CHECK (again->kind == ma::ProfileKind::delivery);
+    CHECK (again->dynamicsFromGenre);
+    CHECK (again->getShortName() == "F");
+    CHECK (ma::TargetProfile::fromJson (parse (R"({"id":"g","name":"G"})")->toJson())->getShortName() == "G");
 }
 
 TEST_CASE ("Profilo da snapshot: round-trip JSON", "[profiles]")
@@ -466,4 +494,196 @@ TEST_CASE ("Broadcast troppo forte con picchi oltre il massimo: un solo guadagno
     // se abbassando i picchi restano oltre il massimo, il limiter resta necessario
     const auto hot = ma::compare (fakeMaster (-22.0f, 1.0f), ebu);
     CHECK (findKey (hot, ma::highlight::truePeak)->action.contains ("Limiter true peak"));
+}
+
+//==============================================================================
+// Target in due parti: genere (il suono) × consegna (loudness, picchi e dinamica)
+
+namespace
+{
+    bool sameRange (const ma::MetricRange* a, const ma::MetricRange* b)
+    {
+        return a != nullptr && b != nullptr && a->min == b->min && a->max == b->max && a->target == b->target && a->warn == b->warn;
+    }
+
+    /** Stesse diagnosi (metrica, severità, messaggio, azione) e stesso voto. */
+    void checkSameComparison (const ma::ComparisonResult& a, const ma::ComparisonResult& b)
+    {
+        CHECK (a.score == b.score);
+        REQUIRE (a.findings.size() == b.findings.size());
+        for (size_t i = 0; i < a.findings.size(); ++i)
+        {
+            INFO (a.findings[i].metric.toStdString());
+            CHECK (a.findings[i].metric == b.findings[i].metric);
+            CHECK (a.findings[i].severity == b.findings[i].severity);
+            CHECK (a.findings[i].message == b.findings[i].message);
+            CHECK (a.findings[i].action == b.findings[i].action);
+        }
+    }
+}
+
+TEST_CASE ("Genere × consegna: il suono dal genere, loudness e dinamica dalla consegna", "[target]")
+{
+    ma::ProfileLibrary lib;
+    const auto& rock = *lib.findById ("rock");
+    const auto& spotify = *lib.findById ("spotify");
+    const auto t = ma::composeTarget (&rock, spotify);
+
+    CHECK (t.name == "Rock · Spotify"_u);
+    CHECK (t.getShortName() == "Rock · Spotify"_u);
+    CHECK (t.id == "rock+spotify");
+
+    REQUIRE (t.tonalCurve.has_value());
+    CHECK (*t.tonalCurve == *rock.tonalCurve);
+    CHECK (t.bandTolerance == rock.bandTolerance);
+    CHECK_FALSE (t.isReference);
+    for (const auto& key : { ma::metric::loudnessRange, ma::metric::correlation, ma::metric::widthPercent,
+                             ma::metric::lowEndWidth, ma::metric::spectralTilt })
+    {
+        INFO (key.toStdString());
+        CHECK (sameRange (t.getMetric (key), rock.getMetric (key)));
+    }
+    for (const auto& key : { ma::metric::integratedLufs, ma::metric::truePeakMax, ma::metric::plr, ma::metric::minPsr })
+    {
+        INFO (key.toStdString());
+        CHECK (sameRange (t.getMetric (key), spotify.getMetric (key)));
+    }
+    // Spotify non chiede un DR: un master dinamico non è un errore (prima il DR del rock da CD lo segnalava)
+    CHECK (t.getMetric (ma::metric::dr) == nullptr);
+    CHECK (t.normalizationLufs == spotify.normalizationLufs);
+    CHECK (t.loudTruePeakMax == spotify.loudTruePeakMax);
+    CHECK (t.context == ma::ProfileContext::streaming);
+}
+
+TEST_CASE ("Master forte: tutto dal genere, come i vecchi profili di genere", "[target]")
+{
+    ma::ProfileLibrary lib;
+    const auto& rock = *lib.findById ("rock");
+    const auto& loud = *lib.findById (ma::targetIds::loud);
+    const auto t = ma::composeTarget (&rock, loud);
+
+    CHECK (t.id == "rock");
+    CHECK (t.getShortName() == "Rock · Master forte"_u);
+    CHECK (t.context == ma::ProfileContext::music);
+    CHECK (t.metrics.size() == rock.metrics.size());
+    for (const auto& [key, range] : rock.metrics)
+    {
+        INFO (key.toStdString());
+        CHECK (sameRange (t.getMetric (key), &range));
+    }
+
+    auto s = fakeMaster (-12.0f, -1.5f);
+    checkSameComparison (ma::compare (s, t), ma::compare (s, rock));
+    s = fakeMaster (-7.0f, 0.3f);
+    checkSameComparison (ma::compare (s, t), ma::compare (s, rock));
+}
+
+TEST_CASE ("Nessun genere con EBU R128: lo stesso confronto del vecchio profilo broadcast", "[target]")
+{
+    ma::ProfileLibrary lib;
+    const auto& ebu = *lib.findById ("ebu_r128");
+    const auto t = ma::composeTarget (nullptr, ebu);
+
+    CHECK (t.id == "ebu_r128");
+    CHECK (t.name == ebu.name);
+    CHECK (t.getShortName() == "EBU R128");
+    CHECK_FALSE (t.tonalCurve.has_value());
+    CHECK (t.isDeliveryStandard());
+    CHECK (t.metrics.size() == ebu.metrics.size());
+
+    for (const auto& s : { fakeMaster (-16.0f, -0.5f), fakeMaster (-23.0f, -3.0f), fakeMaster (-26.0f, -8.0f) })
+        checkSameComparison (ma::compare (s, t), ma::compare (s, ebu));
+
+    // con un genere: il tonale del rock e le specifiche EBU, e i consigli restano quelli di consegna
+    const auto rockEbu = ma::composeTarget (lib.findById ("rock"), ebu);
+    CHECK (rockEbu.tonalCurve.has_value());
+    CHECK (rockEbu.isDeliveryStandard());
+    CHECK (sameRange (rockEbu.getMetric (ma::metric::integratedLufs), ebu.getMetric (ma::metric::integratedLufs)));
+    CHECK (rockEbu.getMetric (ma::metric::plr) == nullptr);
+    const auto r = ma::compare (fakeMaster (-16.0f, -0.5f), rockEbu);
+    REQUIRE (findKey (r, ma::highlight::integrated) != nullptr);
+    CHECK (findKey (r, ma::highlight::integrated)->action.contains ("Abbassa il guadagno"));
+    // il consiglio nomina lo standard, non il target composto ("Rock · EBU R128")
+    CHECK (findKey (r, ma::highlight::integrated)->message.contains ("standard " + ebu.name));
+    CHECK_FALSE (findKey (r, ma::highlight::integrated)->message.contains ("Rock"));
+}
+
+TEST_CASE ("Rock a -12 LUFS per Spotify: nessun critico di loudness, tonale del rock", "[target]")
+{
+    ma::ProfileLibrary lib;
+    const auto& rock = *lib.findById ("rock");
+    auto s = fakeMaster (-12.0f, -1.5f);
+    s.thirdOctaveDb = *rock.tonalCurve;
+    s.spectralTiltDbPerOct = rock.getMetric (ma::metric::spectralTilt)->target;
+
+    // con il solo profilo Rock (master da CD) il loudness è critico
+    const auto asCd = ma::compare (s, ma::composeTarget (&rock, *lib.findById (ma::targetIds::loud)));
+    REQUIRE (findKey (asCd, ma::highlight::integrated) != nullptr);
+    CHECK (findKey (asCd, ma::highlight::integrated)->severity == ma::Severity::critical);
+
+    const auto r = ma::compare (s, ma::composeTarget (&rock, *lib.findById ("spotify")));
+    for (const auto& f : r.findings)
+    {
+        INFO (f.metric.toStdString() + ": " + f.message.toStdString());
+        CHECK (f.severity < ma::Severity::critical);
+        CHECK_FALSE ((f.key.startsWith ("band:") && f.severity >= ma::Severity::warning));
+    }
+    // più forte di -14 LUFS: la piattaforma lo abbassa, da verificare
+    REQUIRE (findKey (r, ma::highlight::integrated) != nullptr);
+    CHECK (findKey (r, ma::highlight::integrated)->severity == ma::Severity::warning);
+    CHECK (r.hasTonalTarget);
+    CHECK (r.tonalTarget == *rock.tonalCurve);
+}
+
+TEST_CASE ("Reference come genere: con Master forte vale per intero, con una piattaforma solo il suono", "[target]")
+{
+    ma::ProfileLibrary lib;
+    const auto s = test::analyse (test::pinkNoise (10.0, 0.5f));
+    auto ref = ma::TargetProfile::fromSnapshot (s, "Reference: Brano");
+    ref.shortName = "Reference";
+
+    const auto& loud = *lib.findById (ma::targetIds::loud);
+    const auto whole = ma::composeTarget (&ref, loud);
+    CHECK (whole.name == "Reference: Brano");
+    CHECK (whole.getShortName() == "Reference");
+    CHECK (whole.id == ref.id);
+    CHECK (whole.isReference);
+    CHECK (whole.metrics.size() == ref.metrics.size());
+
+    const auto& spotify = *lib.findById ("spotify");
+    const auto t = ma::composeTarget (&ref, spotify);
+    CHECK (t.getShortName() == "Reference · Spotify"_u);
+    CHECK (t.id.startsWith ("ref_"));   // lo spettro non ridisegna la curva del reference come target
+    CHECK (t.isReference);
+    CHECK (*t.tonalCurve == *ref.tonalCurve);
+    CHECK (sameRange (t.getMetric (ma::metric::integratedLufs), spotify.getMetric (ma::metric::integratedLufs)));
+    CHECK (sameRange (t.getMetric (ma::metric::loudnessRange), ref.getMetric (ma::metric::loudnessRange)));
+    // il crest per banda cala con il limiting: con un reference da CD e Spotify segnalerebbe un master giusto
+    CHECK (t.getMetric (ma::metric::crestLow) == nullptr);
+    CHECK (t.getMetric (ma::metric::dr) == nullptr);
+}
+
+TEST_CASE ("Migrazione del vecchio target unico", "[target]")
+{
+    ma::ProfileLibrary lib;
+    const auto check = [&] (const char* oldId, const juce::String& genre, const juce::String& delivery)
+    {
+        const auto t = ma::migrateTargetId (lib, oldId);
+        INFO (oldId);
+        CHECK (t.genre == genre);
+        CHECK (t.delivery == delivery);
+    };
+    check ("spotify", "pop", "spotify");                     // le piattaforme usavano la curva Pop
+    check ("streaming_generic", "pop", "streaming_generic");
+    check ("youtube", "pop", "youtube");
+    check ("ebu_r128", "none", "ebu_r128");
+    check ("podcast", "none", "podcast");
+    check ("rock", "rock", "loud");
+    check ("__reference__", "__reference__", "loud");
+    check ("user_mio_profilo", "user_mio_profilo", "loud");   // anche se non esiste più: l'editor ripiega sul predefinito
+    check ("", "pop", "streaming_generic");
+
+    // il vecchio "Spotify" diventa Pop · Spotify: stessa curva tonale di prima
+    const auto popSpotify = ma::composeTarget (lib.findById ("pop"), *lib.findById ("spotify"));
+    CHECK (*popSpotify.tonalCurve == *lib.findById ("pop")->tonalCurve);
 }

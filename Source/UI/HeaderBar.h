@@ -22,6 +22,16 @@ private:
     Icon icon;
 };
 
+/** Pulsante del target ("Rock · Spotify"), disegnato come un menu a tendina. */
+class TargetButton : public juce::Button
+{
+public:
+    TargetButton() : juce::Button ("Target") {}
+
+protected:
+    void paintButton (juce::Graphics& g, bool isMouseOver, bool isButtonDown) override;
+};
+
 /**
     Barra superiore: target, modalità (brano intero / live), reference, A/B, opzioni, reset, export, guida, schermo intero.
     Nell'app standalone, al posto di modalità e reset: "Nuova analisi" e il ritorno all'album.
@@ -35,16 +45,17 @@ public:
     void resized() override;
     void lookAndFeelChanged() override;
 
-    /** Voce del selettore: le voci consecutive con lo stesso gruppo stanno sotto un'intestazione. */
+    /** Voce del menu del target: tra voci consecutive di gruppi diversi c'è un separatore. */
     struct TargetItem
     {
         juce::String id, name;
-        juce::String group;   // vuoto = nessuna intestazione
+        juce::String group;
+        bool enabled = true;
     };
 
-    /** Popola il selettore (id dei profili + voce reference). */
-    void setTargets (const std::vector<TargetItem>& items, const juce::String& selectedId);
-    juce::String getSelectedTargetId() const;
+    /** Voci del menu (sezioni Genere e Consegna), scelta attuale e testo del pulsante ("Rock · Spotify"). */
+    void setTargets (const std::vector<TargetItem>& genres, const std::vector<TargetItem>& deliveries,
+                     const ma::TargetSelection& selected, const juce::String& label);
 
     void setReferenceStatus (const juce::String& text, juce::Colour colour, bool referenceReady, bool hasReference);
     void setListening (bool listening);
@@ -59,21 +70,26 @@ public:
     /** Standalone: sulla schermata iniziale "Nuova analisi" non serve. */
     void setNewAnalysisEnabled (bool enabled) { newAnalysisButton.setEnabled (enabled); }
 
-    std::function<void (const juce::String&)> onTargetChanged;
+    std::function<void (const ma::TargetSelection&)> onTargetChanged;
     std::function<void()> onLoadReference, onClearReference, onSaveProfile, onReset, onExport, onOptions, onToggleFullScreen;
     std::function<void()> onNewAnalysis, onShowAlbum;
     std::function<void (bool)> onListenChanged, onLiveModeChanged, onMixPhaseChanged, onHelpModeChanged;
 
     juce::Component& getOptionsButton() noexcept { return optionsButton; }
     juce::Component& getExportButton() noexcept  { return exportButton; }
+    juce::Component& getTargetButton() noexcept  { return targetButton; }
+
+    /** Menu del target (sezioni Genere e Consegna). Con parent si apre dentro quel componente (anteprime PNG). */
+    void showTargetMenu (juce::Component* parent = nullptr);
 
 private:
     void applyColours();
 
     static constexpr int groupGap = 14;   // spazio tra i gruppi di controlli (con il separatore al centro)
 
-    juce::ComboBox targetBox;
-    juce::StringArray targetIds;
+    TargetButton targetButton;
+    std::vector<TargetItem> genreItems, deliveryItems;
+    ma::TargetSelection selectedTarget;
 
     juce::TextButton wholeSongButton { "Brano intero" };
     juce::TextButton liveButton { "Live" };

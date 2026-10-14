@@ -16,5 +16,7 @@
       "warn": 0.2
     }
   },
+  "kind": "delivery",
+  "shortName": "ATSC A/85",
   "context": "broadcast"
 }

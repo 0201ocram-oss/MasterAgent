@@ -46,6 +46,7 @@ juce_add_binary_data(MasterAgentProfiles
     HEADER_NAME MasterAgentProfiles.h
     NAMESPACE ProfileData
     SOURCES
+        Resources/profiles/loud.json
         Resources/profiles/streaming_generic.json
         Resources/profiles/spotify.json
         Resources/profiles/apple_music.json

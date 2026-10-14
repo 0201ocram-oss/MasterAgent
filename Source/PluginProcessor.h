@@ -97,9 +97,9 @@ public:
     /** Brano intero (accumula dall'ultimo reset) oppure Live (finestra mobile). */
     void setLiveMode (bool shouldBeLive, double windowSeconds);
 
-    static constexpr const char* referenceTargetId = "__reference__";
-    juce::String getSelectedTargetId() const;
-    void setSelectedTargetId (const juce::String& id);
+    /** Target: genere (o reference, o nessuno) e consegna. */
+    ma::TargetSelection getTargetSelection() const;
+    void setTargetSelection (const ma::TargetSelection& selection);
 
     /** Diagnosi segnate dall'utente come scelte volute (Finding::id): fuori da voti e priorità, salvate nel progetto. */
     juce::StringArray getIgnoredFindings() const;
@@ -203,7 +203,7 @@ private:
     ma::ProfileLibrary profiles;
 
     juce::CriticalSection settingsLock;
-    juce::String selectedTargetId { "streaming_generic" };
+    ma::TargetSelection selectedTarget { ma::targetIds::defaultGenre, ma::targetIds::defaultDelivery };
     juce::StringArray ignoredFindings;
 
     ma::BatchAnalysisJob masterFileJob;

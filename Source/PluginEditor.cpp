@@ -125,9 +125,10 @@ MasterAgentEditor::MasterAgentEditor (MasterAgentProcessor& p)
     header.setLiveMode (processor.liveMode.load());
     header.setMixPhase (processor.mixPhase.load());
 
-    header.onTargetChanged = [this] (const juce::String& id)
+    header.onTargetChanged = [this] (const TargetSelection& selection)
     {
-        processor.setSelectedTargetId (id);
+        processor.setTargetSelection (selection);
+        refreshTargets();
         updateComparison();
         pushDataToPanels();
     };
@@ -588,28 +589,73 @@ void MasterAgentEditor::setFullScreen (bool on)
 }
 
 //==============================================================================
+MasterAgentEditor::ResolvedTarget MasterAgentEditor::resolveTarget() const
+{
+    const auto& library = processor.getProfiles();
+    const auto selection = processor.getTargetSelection();
+    ResolvedTarget t;
+    t.selection = selection;
+
+    // consegna sconosciuta (profilo utente cancellato): quella predefinita
+    t.delivery = library.find (selection.delivery, ProfileKind::delivery);
+    if (t.delivery == nullptr)
+    {
+        t.selection.delivery = targetIds::defaultDelivery;
+        t.delivery = library.find (targetIds::defaultDelivery, ProfileKind::delivery);
+    }
+
+    if (selection.genre == targetIds::reference)
+    {
+        t.genreIsReference = true;
+    }
+    else if (selection.genre != targetIds::noGenre)
+    {
+        t.genre = library.find (selection.genre, ProfileKind::genre);
+        if (t.genre == nullptr)
+        {
+            t.selection.genre = targetIds::defaultGenre;
+            t.genre = library.find (targetIds::defaultGenre, ProfileKind::genre);
+        }
+    }
+    return t;
+}
+
 void MasterAgentEditor::refreshTargets()
 {
-    auto groupOf = [] (const TargetProfile& p)
-    {
-        if (p.id.startsWith ("user_"))
-            return "Profili utente"_t;
-        switch (p.context)
-        {
-            case ProfileContext::streaming: return "Piattaforme streaming"_t;
-            case ProfileContext::broadcast:
-            case ProfileContext::podcast:   return "Broadcast e podcast"_t;
-            case ProfileContext::music:     break;
-        }
-        return "Generi musicali"_t;
-    };
+    const auto target = resolveTarget();
+    const bool referenceLike = target.genreIsReference || (target.genre != nullptr && target.genre->isReference);
+    const bool loudDelivery = target.delivery != nullptr && target.delivery->dynamicsFromGenre;
 
-    std::vector<HeaderBar::TargetItem> items;
-    items.push_back ({ MasterAgentProcessor::referenceTargetId, "Brano di riferimento (reference)", {} });
+    std::vector<HeaderBar::TargetItem> genres, deliveries;
+    genres.push_back ({ targetIds::reference, "Brano di riferimento (reference)"_t, "reference" });
     for (const auto& p : processor.getProfiles().getProfiles())
-        items.push_back ({ p.id, p.name, groupOf (p) });
+    {
+        if (p.kind == ProfileKind::genre)
+            genres.push_back ({ p.id, p.name, p.id.startsWith ("user_") ? "user" : "genre" });
+        else
+            deliveries.push_back ({ p.id, p.dynamicsFromGenre && referenceLike ? "Come il reference"_t : p.name,
+                                    p.dynamicsFromGenre ? "loud" : p.isDeliveryStandard() ? "broadcast" : "streaming",
+                                    ! p.dynamicsFromGenre || target.selection.genre != targetIds::noGenre });
+    }
+    // senza genere e con "Master forte" non resterebbe niente da confrontare
+    genres.push_back ({ targetIds::noGenre, "Nessuno (solo specifiche)"_t, "none", ! loudDelivery });
 
-    header.setTargets (items, processor.getSelectedTargetId());
+    // consegne nell'ordine: master forte, streaming, broadcast e podcast
+    std::stable_sort (deliveries.begin(), deliveries.end(), [] (const auto& a, const auto& b)
+    {
+        const auto rank = [] (const juce::String& g) { return g == "loud" ? 0 : g == "streaming" ? 1 : 2; };
+        return rank (a.group) < rank (b.group);
+    });
+
+    juce::String label;
+    if (target.delivery != nullptr)
+    {
+        TargetProfile referencePlaceholder;
+        referencePlaceholder.name = "Reference";
+        referencePlaceholder.isReference = true;
+        label = composedShortName (target.genreIsReference ? &referencePlaceholder : target.genre, *target.delivery);
+    }
+    header.setTargets (genres, deliveries, target.selection, label);
 }
 
 void MasterAgentEditor::updateReferenceStatus()
@@ -663,27 +709,25 @@ void MasterAgentEditor::updateComparison()
         data.versionComparison = {};
     }
 
-    // profilo attivo
-    const auto targetId = processor.getSelectedTargetId();
-    const TargetProfile* profile = nullptr;
-
-    if (targetId == MasterAgentProcessor::referenceTargetId)
+    // profilo attivo: genere (o reference) composto con la consegna
+    const auto active = resolveTarget();
+    const TargetProfile* genre = active.genre;
+    if (active.genreIsReference && data.hasReference)
     {
-        if (data.hasReference)
+        if (referenceProfileSource != ref.getFile())
         {
-            if (referenceProfileSource != ref.getFile())
-            {
-                referenceProfile = TargetProfile::fromSnapshot (data.reference, "Reference: " + ref.getFile().getFileNameWithoutExtension());
-                referenceProfileSource = ref.getFile();
-            }
-            profile = &referenceProfile;
+            referenceProfile = TargetProfile::fromSnapshot (data.reference, "Reference: " + ref.getFile().getFileNameWithoutExtension());
+            referenceProfile.shortName = "Reference";
+            referenceProfileSource = ref.getFile();
         }
+        genre = &referenceProfile;
     }
-    else
+
+    const TargetProfile* profile = nullptr;
+    if (active.delivery != nullptr && ! (active.genreIsReference && ! data.hasReference))
     {
-        profile = processor.getProfiles().findById (targetId);
-        if (profile == nullptr && ! processor.getProfiles().getProfiles().empty())
-            profile = &processor.getProfiles().getProfiles().front();
+        composedTarget = composeTarget (genre, *active.delivery);
+        profile = &composedTarget;
     }
 
     data.profile = profile;
@@ -1352,9 +1396,11 @@ void MasterAgentEditor::chooseReference()
                                   if (file.existsAsFile())
                                   {
                                       processor.loadReference (file);
-                                      if (processor.getSelectedTargetId() != MasterAgentProcessor::referenceTargetId)
+                                      // il reference diventa il genere; la consegna scelta resta
+                                      if (auto target = processor.getTargetSelection(); target.genre != targetIds::reference)
                                       {
-                                          processor.setSelectedTargetId (MasterAgentProcessor::referenceTargetId);
+                                          target.genre = targetIds::reference;
+                                          processor.setTargetSelection (target);
                                           refreshTargets();
                                       }
                                   }
@@ -1476,7 +1522,9 @@ void MasterAgentEditor::askProfileName (std::vector<AnalysisSnapshot> snapshots,
             juce::String error;
             if (safe->processor.getProfiles().saveUserProfile (profile, error))
             {
-                safe->processor.setSelectedTargetId ("user_" + profile.id);
+                auto target = safe->processor.getTargetSelection();
+                target.genre = "user_" + profile.id;
+                safe->processor.setTargetSelection (target);
                 safe->refreshTargets();
                 safe->updateComparison();
                 safe->pushDataToPanels();

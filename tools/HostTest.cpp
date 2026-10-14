@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <tuple>
 
 namespace
 {
@@ -34,6 +35,30 @@ namespace
     };
 
     PlayingTransport transport;
+
+    /** Lo stato di un VST3 ospitato è un XML con lo stato del componente in base64: lì c'è il ValueTree del plugin. */
+    juce::ValueTree pluginTreeFromHostState (const juce::MemoryBlock& state)
+    {
+        if (auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize()))
+            if (auto* component = xml->getChildByName ("IComponent"))
+            {
+                juce::MemoryBlock data;
+                if (data.fromBase64Encoding (component->getAllSubText()))
+                    return juce::ValueTree::readFromData (data.getData(), data.getSize());
+            }
+        return {};
+    }
+
+    juce::MemoryBlock hostStateWithPluginTree (const juce::ValueTree& tree)
+    {
+        juce::MemoryOutputStream stream;
+        tree.writeToStream (stream);
+        juce::XmlElement xml ("VST3PluginState");
+        xml.createNewChildElement ("IComponent")->addTextElement (stream.getMemoryBlock().toBase64Encoding());
+        juce::MemoryBlock out;
+        juce::AudioProcessor::copyXmlToBinary (xml, out);
+        return out;
+    }
 
     void check (bool ok, const juce::String& what)
     {
@@ -233,6 +258,29 @@ int main (int argc, char* argv[])
         restored->getStateInformation (state2);
         check (state.getSize() > 0 && state == state2, "stato salvato e ripristinato identico (" + juce::String ((int) state.getSize()) + " byte)");
         check (nullTest (*restored, 48000.0, 512, false, 2, 3.0), "trasparente dopo il ripristino dello stato");
+
+        const auto current = pluginTreeFromHostState (state);
+        check (current["genre"].toString() == "pop" && current["delivery"].toString() == "streaming_generic",
+               "target predefinito: genere pop, consegna streaming_generic");
+
+        // progetti salvati prima della scelta genere × consegna: il vecchio "target" diventa genere e consegna
+        for (const auto& [oldTarget, genre, delivery] : { std::tuple<const char*, const char*, const char*> { "spotify", "pop", "spotify" },
+                                                          { "ebu_r128", "none", "ebu_r128" },
+                                                          { "rock", "rock", "loud" },
+                                                          { "__reference__", "__reference__", "loud" } })
+        {
+            juce::ValueTree old ("MasterAgentState");
+            old.setProperty ("version", 1, nullptr);
+            old.setProperty ("target", oldTarget, nullptr);
+            const auto oldState = hostStateWithPluginTree (old);
+            restored->setStateInformation (oldState.getData(), (int) oldState.getSize());
+
+            juce::MemoryBlock migrated;
+            restored->getStateInformation (migrated);
+            const auto tree = pluginTreeFromHostState (migrated);
+            check (tree["genre"].toString() == genre && tree["delivery"].toString() == delivery,
+                   juce::String ("progetto vecchio con target ") + oldTarget + ": genere " + genre + ", consegna " + delivery);
+        }
         check (plugin->getLatencySamples() == 0, "latenza dichiarata: 0 campioni");
         check (plugin->getTailLengthSeconds() == 0.0, "coda (tail): 0 s");
     }

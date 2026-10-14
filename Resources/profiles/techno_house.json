@@ -97,5 +97,7 @@
     -16.17,
     -18.8
   ],
-  "tonalTolerance": 2.5
+  "tonalTolerance": 2.5,
+  "kind": "genre",
+  "shortName": "Techno"
 }

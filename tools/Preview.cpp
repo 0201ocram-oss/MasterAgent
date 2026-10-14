@@ -62,7 +62,8 @@ namespace
                 addAndMakeVisible (*c);
             addChildComponent (waveform);
             addChildComponent (start);
-            header.setTargets ({ { "pop", "Pop commerciale" } }, "pop");
+            header.setTargets ({ { "pop", "Pop commerciale" } }, { { "loud", "Master forte (CD, club)" } }, { "pop", "loud" },
+                               "Pop · Master forte"_u);
             header.setReferenceStatus ("reference_mix.wav", ma::ui::colours::reference, true, true);
             setSize (1440, 900);
         }
@@ -162,7 +163,8 @@ int main (int argc, char* argv[])
     data.hasReference = true;
 
     ma::ProfileLibrary lib;
-    data.profile = lib.findById ("pop");
+    const auto popLoud = ma::composeTarget (lib.findById ("pop"), *lib.findById ("loud"));
+    data.profile = &popLoud;
     data.targetName = data.profile->name;
     data.comparison = ma::compare (data.master, *data.profile);
 
@@ -297,19 +299,42 @@ int main (int argc, char* argv[])
             data.monitor = {};
         }
 
-        // target broadcast (EBU R128): niente curva tonale, anteprima streaming solo indicativa
+        // target broadcast (EBU R128, nessun genere): niente curva tonale, anteprima streaming solo indicativa
         {
             const auto* music = data.profile;
-            data.profile = lib.findById ("ebu_r128");
+            const auto ebu = ma::composeTarget (nullptr, *lib.findById ("ebu_r128"));
+            data.profile = &ebu;
             data.targetName = data.profile->name;
             data.comparison = ma::compare (data.master, *data.profile);
-            dash.header.setTargets ({ { "ebu_r128", data.profile->name, "Broadcast e podcast" } }, "ebu_r128");
+            dash.header.setTargets ({}, {}, { "none", "ebu_r128" }, ebu.getShortName());
             render ("preview_broadcast.png");
+
+            // genere × consegna: tonale dell'hip-hop, loudness di Apple Music (il nome più lungo nel pulsante)
+            const auto longName = ma::composeTarget (lib.findById ("hiphop_trap"), *lib.findById ("apple_music"));
+            data.profile = &longName;
+            data.targetName = data.profile->name;
+            data.comparison = ma::compare (data.master, *data.profile);
+            dash.header.setTargets ({}, {}, { "hiphop_trap", "apple_music" }, longName.getShortName());
+            render ("preview_genre_delivery.png");
 
             data.profile = music;
             data.targetName = music->name;
             data.comparison = ma::compare (data.master, *data.profile);
-            dash.header.setTargets ({ { "pop", "Pop commerciale" } }, "pop");
+
+            // menu del target: sezioni Genere e Consegna, con la scelta attuale spuntata
+            std::vector<ma::ui::HeaderBar::TargetItem> genres { { "__reference__", "Brano di riferimento (reference)", "reference" } }, deliveries;
+            for (const auto& p : lib.getProfiles())
+                if (p.kind == ma::ProfileKind::genre)
+                    genres.push_back ({ p.id, p.name, p.id.startsWith ("user_") ? "user" : "genre" });
+                else
+                    deliveries.push_back ({ p.id, p.name, p.dynamicsFromGenre ? "loud" : p.isDeliveryStandard() ? "broadcast" : "streaming" });
+            genres.push_back ({ "none", "Nessuno (solo specifiche)", "none" });
+            dash.header.setTargets (genres, deliveries, { "rock", "spotify" }, "Rock · Spotify"_u);
+            dash.header.showTargetMenu (&dash);
+            render ("preview_target_menu.png");
+            juce::PopupMenu::dismissAllActiveMenus();
+
+            dash.header.setTargets ({}, {}, { "pop", "loud" }, music->getShortName());
         }
 
         // coerenza album: 5 brani, uno più brillante e meno limitato, uno più forte

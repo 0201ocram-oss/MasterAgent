@@ -414,6 +414,9 @@ int runBench (int argc, char* argv[])
         if (! genre)
             if (const auto* p = lib.findById (job["genre"].toString()))
                 genre = *p;
+        // master da CD: il genere con la consegna "Master forte", come nell'app
+        if (const auto* loud = lib.find (ma::targetIds::loud, ma::ProfileKind::delivery); genre && loud != nullptr)
+            genre = ma::composeTarget (&*genre, *loud);
 
         // profilo dagli altri brani dello stesso album
         std::vector<ma::AnalysisSnapshot> albumSnapshots;

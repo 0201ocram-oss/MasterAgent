@@ -75,6 +75,16 @@ private:
     void setListening (bool on);
 
     void timerCallback() override;
+
+    /** Scelta del target con i profili trovati (id sconosciuti sostituiti da quelli predefiniti). */
+    struct ResolvedTarget
+    {
+        ma::TargetSelection selection;
+        const ma::TargetProfile* genre = nullptr;      // nullptr: nessun genere, oppure il reference
+        bool genreIsReference = false;
+        const ma::TargetProfile* delivery = nullptr;
+    };
+    ResolvedTarget resolveTarget() const;
     void refreshTargets();
     void updateReferenceStatus();
     void updateComparison();
@@ -156,6 +166,7 @@ private:
     ma::ui::DashboardData data;
     ma::TargetProfile referenceProfile;
     juce::File referenceProfileSource;
+    ma::TargetProfile composedTarget;   // genere × consegna attivo (data.profile punta qui)
     ma::ReferenceTrack::State lastRefState = ma::ReferenceTrack::State::empty;
 
     juce::Image backgroundCache;   // gradiente + ombre dei pannelli, rigenerato al resize

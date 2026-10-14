@@ -240,16 +240,16 @@ void MasterAgentProcessor::loadReference (const juce::File& file)
     reference.load (file, currentSampleRate);
 }
 
-juce::String MasterAgentProcessor::getSelectedTargetId() const
+ma::TargetSelection MasterAgentProcessor::getTargetSelection() const
 {
     const juce::ScopedLock lock (settingsLock);
-    return selectedTargetId;
+    return selectedTarget;
 }
 
-void MasterAgentProcessor::setSelectedTargetId (const juce::String& id)
+void MasterAgentProcessor::setTargetSelection (const ma::TargetSelection& selection)
 {
     const juce::ScopedLock lock (settingsLock);
-    selectedTargetId = id;
+    selectedTarget = selection;
 }
 
 juce::StringArray MasterAgentProcessor::getIgnoredFindings() const
@@ -613,7 +613,9 @@ void MasterAgentProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     juce::ValueTree state ("MasterAgentState");
     state.setProperty ("version", 1, nullptr);
-    state.setProperty ("target", getSelectedTargetId(), nullptr);
+    const auto target = getTargetSelection();
+    state.setProperty ("genre", target.genre, nullptr);
+    state.setProperty ("delivery", target.delivery, nullptr);
     state.setProperty ("ignoredFindings", getIgnoredFindings().joinIntoString ("\n"), nullptr);
     {
         const juce::ScopedLock lock (settingsLock);
@@ -652,7 +654,11 @@ void MasterAgentProcessor::setStateInformation (const void* data, int sizeInByte
     if (! state.hasType ("MasterAgentState"))
         return;
 
-    setSelectedTargetId (state.getProperty ("target", "streaming_generic").toString());
+    // progetti salvati prima della scelta genere × consegna: un solo "target" da convertire
+    if (state.hasProperty ("genre"))
+        setTargetSelection ({ state.getProperty ("genre").toString(), state.getProperty ("delivery", ma::targetIds::defaultDelivery).toString() });
+    else
+        setTargetSelection (ma::migrateTargetId (profiles, state.getProperty ("target", ma::targetIds::defaultDelivery).toString()));
     {
         auto ignored = juce::StringArray::fromLines (state.getProperty ("ignoredFindings", {}).toString());
         ignored.removeEmptyStrings();
