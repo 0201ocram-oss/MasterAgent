@@ -1007,7 +1007,8 @@ void MasterAgentEditor::checkAudioOutput()
     audioWarningShown = true;
     player.pause();
     const auto message = device == nullptr
-        ? "Nessuna scheda audio attiva: scegli l'uscita nelle impostazioni audio."_t
+        ? "Nessuna scheda audio attiva: scegli l'uscita nelle impostazioni audio. Se nessuna si apre, il problema è "
+          "nell'audio di Windows: prova un video nel browser e, se non si sente, riavvia il PC."_t
         : "La scheda audio %1 non sta suonando: forse è scollegata o usata in modo esclusivo da un altro programma. "
           "Scegli un'altra uscita nelle impostazioni audio."_t.replace ("%1", device->getName());
     juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon, "Nessun audio in uscita"_t, message,

@@ -6,7 +6,9 @@
 // 2. Costo CPU di processBlock in real-time.
 // 3. Render offline (setNonRealtime): velocità e assenza di blocchi.
 // 4. Salvataggio/ripristino dello stato.
+// Con --audio-devices: dispositivi audio come li vede l'app standalone e prova di apertura di ogni uscita.
 
+#include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <chrono>
@@ -139,13 +141,77 @@ namespace
     }
 }
 
+namespace
+{
+    juce::String describe (juce::AudioIODevice* device)
+    {
+        if (device == nullptr)
+            return "nessun dispositivo aperto";
+        return device->getTypeName() + " / " + device->getName() + "  " + juce::String (device->getCurrentSampleRate(), 0) + " Hz, blocco "
+             + juce::String (device->getCurrentBufferSizeSamples()) + ", uscite attive " + juce::String (device->getActiveOutputChannels().countNumberOfSetBits())
+             + (device->isPlaying() ? ", in funzione" : ", fermo");
+    }
+
+    /**
+        --audio-devices: i dispositivi audio come li vede l'app standalone (stessi tipi JUCE) e la prova di apertura
+        di ogni uscita con 0 ingressi e 2 uscite, come fa l'app. Solo modalità condivise: non toglie l'audio agli
+        altri programmi.
+    */
+    int probeAudioDevices()
+    {
+        juce::AudioDeviceManager manager;
+        std::printf ("Tipi di dispositivo disponibili:\n");
+        for (auto* type : manager.getAvailableDeviceTypes())
+        {
+            type->scanForDevices();
+            const auto outputs = type->getDeviceNames (false);
+            const int defaultIndex = type->getDefaultDeviceIndex (false);
+            std::printf ("\n%s: %d uscite\n", type->getTypeName().toRawUTF8(), outputs.size());
+            for (int i = 0; i < outputs.size(); ++i)
+                std::printf ("  %s %s\n", i == defaultIndex ? "*" : "-", outputs[i].toRawUTF8());
+        }
+
+        // come l'app al primo avvio: tipo e uscita predefiniti
+        const auto error = manager.initialise (0, 2, nullptr, true);
+        std::printf ("\nApertura predefinita (come l'app): %s\n  %s\n", error.isEmpty() ? "OK" : ("ERRORE: " + error).toRawUTF8(),
+                     describe (manager.getCurrentAudioDevice()).toRawUTF8());
+
+        for (const auto* typeName : { "Windows Audio", "Windows Audio (Low Latency Mode)", "DirectSound" })
+        {
+            manager.setCurrentAudioDeviceType (typeName, true);
+            auto* type = manager.getCurrentDeviceTypeObject();
+            if (type == nullptr || type->getTypeName() != typeName)
+                continue;
+            std::printf ("\n%s:\n", typeName);
+            for (const auto& name : type->getDeviceNames (false))
+            {
+                auto setup = manager.getAudioDeviceSetup();
+                setup.outputDeviceName = name;
+                setup.inputDeviceName = {};
+                setup.useDefaultInputChannels = false;
+                setup.inputChannels.clear();
+                setup.useDefaultOutputChannels = true;
+                const auto result = manager.setAudioDeviceSetup (setup, true);
+                juce::Thread::sleep (300);
+                std::printf ("  %s\n    %s\n", name.toRawUTF8(),
+                             result.isEmpty() ? describe (manager.getCurrentAudioDevice()).toRawUTF8() : ("ERRORE: " + result).toRawUTF8());
+            }
+        }
+        manager.closeAudioDevice();
+        return 0;
+    }
+}
+
 int main (int argc, char* argv[])
 {
     juce::ScopedJuceInitialiser_GUI init;
 
+    if (argc > 1 && juce::String (argv[1]) == "--audio-devices")
+        return probeAudioDevices();
+
     if (argc < 2)
     {
-        std::printf ("Uso: MasterAgentHostTest <MasterAgent.vst3>\n");
+        std::printf ("Uso: MasterAgentHostTest <MasterAgent.vst3>   oppure   MasterAgentHostTest --audio-devices\n");
         return 2;
     }
 

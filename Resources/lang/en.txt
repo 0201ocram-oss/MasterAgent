@@ -359,5 +359,5 @@ countries: gb us
 "nessuna scheda audio attiva" = "no active audio device"
 "Nessun audio in uscita" = "No audio output"
 "Impostazioni audio..." = "Audio settings..."
-"Nessuna scheda audio attiva: scegli l'uscita nelle impostazioni audio." = "No active audio device: choose the output in the audio settings."
+"Nessuna scheda audio attiva: scegli l'uscita nelle impostazioni audio. Se nessuna si apre, il problema è nell'audio di Windows: prova un video nel browser e, se non si sente, riavvia il PC." = "No active audio device: choose the output in the audio settings. If none opens, the problem is in Windows audio: try a video in the browser and, if you hear nothing, restart the PC."
 "La scheda audio %1 non sta suonando: forse è scollegata o usata in modo esclusivo da un altro programma. Scegli un'altra uscita nelle impostazioni audio." = "The audio device %1 is not playing: it may be disconnected or used exclusively by another program. Choose another output in the audio settings."

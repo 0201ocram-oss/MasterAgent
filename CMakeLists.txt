@@ -208,6 +208,7 @@ if(MASTERAGENT_BUILD_TESTS)
         JUCE_PLUGINHOST_VST3=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(MasterAgentHostTest PRIVATE
         juce::juce_audio_processors
+        juce::juce_audio_devices
         juce::juce_recommended_config_flags)
 endif()
 
