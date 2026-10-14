@@ -76,7 +76,7 @@ Avvia `MasterAgent.exe` e scegli **Analizza un brano** (oppure trascina il file 
 - **Sezioni troppo compresse** (fascia gialla): PSR sotto il minimo del target. Sul mix bus il controllo è spento, come nel report.
 - **Fase invertita** (fascia rossa): correlazione negativa per almeno un secondo.
 
-Clic sulla forma d'onda per ascoltare da quel punto (barra spaziatrice = play/pausa; l'uscita si sceglie in *Options* in alto a sinistra). Clic su un segno per ascoltarlo da 2 secondi prima, per **ignorarlo** (es. un clipper voluto) o per ignorare tutti i segni dello stesso tipo; lo stesso si fa cliccando una voce della legenda. I segni ignorati restano in grigio e valgono finché il brano resta aperto (non vengono salvati). Le soglie seguono il target attivo e la fase Mix/Master. **Nuova analisi** torna alla schermata iniziale.
+Clic sulla forma d'onda per ascoltare da quel punto (barra spaziatrice = play/pausa; l'uscita si sceglie con *Audio setup* in alto a sinistra). Clic su un segno per ascoltarlo da 2 secondi prima, per **ignorarlo** (es. un clipper voluto) o per ignorare tutti i segni dello stesso tipo; lo stesso si fa cliccando una voce della legenda. I segni ignorati restano in grigio e valgono finché il brano resta aperto (non vengono salvati). Le soglie seguono il target attivo e la fase Mix/Master. **Nuova analisi** torna alla schermata iniziale.
 
 Mentre ascolti, la dashboard va **dal vivo** (badge *LIVE* sul pannello Loudness): momentary, short-term, meter dei picchi (ultimi secondi), TP recente, PSR attuale, spettro istantaneo, correlazione e goniometro seguono ciò che senti, e una linea nella cronologia della loudness segna il punto in ascolto. Integrated, LRA, true peak max, PLR, DR, tonale e report restano quelli dell'analisi del file intero. In pausa i valori dal vivo restano fermi sull'ultimo punto ascoltato.
 
@@ -123,6 +123,8 @@ Il monitor cambia solo l'uscita: l'analisi resta sempre sul segnale originale. S
 - **Schermo intero** (icona accanto a "?"): la dashboard occupa tutto il monitor su cui si trova la finestra del plugin. Per tornare premi **Esc** (o F11), di nuovo l'icona oppure clicca nella finestra del plugin nella DAW.
 
 ### Interfaccia (Opzioni > Interfaccia)
+- **Stile interfaccia**: *Classica* (tutti i grafici e i valori) oppure *Vintage*, che mostra solo i parametri base come su un rack analogico: VU meter ad ago per la loudness (lo 0 VU è il centro del target; senza target o nel mix -18 LUFS), peak meter a doppio ago L/R con la spia OVER, fasometro, display a sette segmenti con le spie di stato (verde nel range, giallo da verificare, rosso critico), bilanciamento tonale come un equalizzatore grafico a 31 bande (ogni cursore è lo scostamento dal target), analizzatore a LED in terzi d'ottava e oscilloscopio a fosfori verdi con i tasti Stereo/Mono/Side. Tasti, caratteri e colori seguono lo stile; tema e accento valgono solo per la classica.
+- **Visualizzazione**: *Anteprima normalizzazione streaming* e *Report e diagnosi* si possono nascondere. La finestra resta della stessa dimensione e gli altri pannelli si allargano a occupare lo spazio.
 - **Tema**: Scuro (default), Chiaro, Grafite (grigi neutri) e Alto contrasto (nero pieno, testi e stati più saturi).
 - **Colore accento**: Azzurro, Turchese, Indaco o Argento. Nel tema chiaro si usano tinte più scure, così restano leggibili.
 - **Ombre e sfumature**: disattivandole si passa a uno stile piatto.

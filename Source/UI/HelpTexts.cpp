@@ -31,6 +31,33 @@ namespace
             { "panel:report",    "Report e diagnosi\nIl verdetto: punteggio, problemi trovati ordinati per gravità e cosa fare. "
                                  "Passa il mouse su una diagnosi per evidenziare l'elemento collegato nella dashboard." },
 
+            // --- stile vintage ---------------------------------------------------------------------------
+            { "panel:meters",    "Meter\nI parametri base su strumenti ad ago: loudness (VU), picchi e fase, con i valori sui display. "
+                                 "Le spie accanto ai valori si accendono del colore della diagnosi: verde nel range, giallo da "
+                                 "verificare, rosso critico; spente se la misura non è valutata." },
+            { "panel:tonalEq",   "Bilanciamento tonale (EQ a bande)\nCome un equalizzatore grafico a 31 bande: ogni cursore è lo "
+                                 "scostamento di quel terzo d'ottava dal target. Cursore in alto = troppa energia, in basso = troppo "
+                                 "poca: per correggere si va nella direzione opposta. Senza un target tonale mostra la curva del master." },
+            { "panel:analyzer",  "Analizzatore\nSpettro in terzi d'ottava su colonne di LED: ciò che si sente ora (nell'app mentre il "
+                                 "brano suona), con la tacca chiara della media del brano e il picco recente." },
+            { "panel:scope",     "Fase e ascolto\nOscilloscopio del campo stereo (goniometro) e tasti per ascoltare in mono o solo il Side." },
+            { "vu:loudness",     "VU loudness\nL'ago segue la loudness momentary con la lentezza di un VU vero (300 ms). Lo 0 VU è il "
+                                 "centro del target di loudness (senza target o nel mix: -18 LUFS); l'arco verde è il range del target. "
+                                 "Il triangolo nero è l'integrated del brano, quello viola il reference." },
+            { "vu:peak",         "Peak meter\nDoppio ago: nero il canale sinistro, rosso il destro, in dBTP (true peak). Salgono subito e "
+                                 "scendono piano, come un PPM. La zona rossa parte dal ceiling consigliato; il triangolo nero è il true "
+                                 "peak massimo del brano, quello viola il reference." },
+            { "vu:phase",        "Fase (correlazione)\n+1 = mono, 0 = canali scorrelati, nella zona rossa (sotto 0) c'è controfase: in "
+                                 "mono si perdono parti del mix. Il triangolo nero è la media del brano, quello viola il reference." },
+            { "vu:over",         "Spia OVER\nSi accende se il true peak ha superato 0 dBTP o se ci sono tratti tosati a fondo scala: "
+                                 "il segnale distorcerà in conversione o nella codifica." },
+            { "eq:graphic",      "Cursori dei terzi d'ottava\nOgni cursore è lo scostamento dal target di un terzo d'ottava (scala ±6 dB; "
+                                 "±12 dB per la curva del master senza target). La fascia verde è la tolleranza della banda, la riga "
+                                 "del cursore si colora se la banda è fuori. Clic su una banda per ascoltarla da sola." },
+            { "rta",             "Analizzatore in terzi d'ottava\nColonne di LED: livello di ogni terzo d'ottava in ciò che si sente, "
+                                 "verde, poi giallo e rosso verso l'alto. La tacca chiara è la media del brano, il LED giallo isolato "
+                                 "il picco degli ultimi istanti." },
+
             // --- loudness -----------------------------------------------------------------------------
             { "integrated",   "Integrated (LUFS)\nVolume percepito medio di tutto il brano dall'ultimo reset, con il gating di "
                               "BS.1770-4: i passaggi quasi silenziosi non contano. È il valore che le piattaforme usano per la "

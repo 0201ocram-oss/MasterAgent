@@ -2,12 +2,14 @@
 
 #include "PluginProcessor.h"
 #include "UI/AlbumView.h"
+#include "UI/DashboardLayout.h"
 #include "UI/HeaderBar.h"
 #include "UI/LoudnessPanel.h"
 #include "UI/ReportPanel.h"
 #include "UI/SpectrumPanel.h"
 #include "UI/StartView.h"
 #include "UI/StereoPanel.h"
+#include "UI/VintagePanels.h"
 #include "UI/WaveformPanel.h"
 
 #include <set>
@@ -136,7 +138,13 @@ private:
     /** Immagine dei pannelli di misura (senza report e barra in alto), per gli export. */
     juce::Image createMeasurementsImage();
 
-    std::array<ma::ui::Panel*, 7> allPanels();
+    /** Pannelli della dashboard del brano (classici, vintage, streaming, report, forma d'onda). */
+    ma::ui::DashboardPanels dashboardPanels();
+    /** Visibilità e disposizione dei pannelli per la schermata, lo stile e i pannelli scelti dal menu. */
+    void updatePanelLayout();
+
+    /** Standalone: il tasto "Options" della finestra (scheda audio) diventa "Audio setup". */
+    void setupStandaloneWindow();
 
     MasterAgentProcessor& processor;
     const bool standalone;
@@ -153,6 +161,10 @@ private:
     ma::ui::StereoPanel stereoPanel;
     ma::ui::StreamingPanel streamingPanel;
     ma::ui::ReportPanel reportPanel;
+    ma::ui::MeterBridgePanel meterPanel;   // stile vintage
+    ma::ui::TonalEqPanel tonalEqPanel;
+    ma::ui::AnalyzerPanel analyzerPanel;
+    ma::ui::ScopePanel scopePanel;
     ma::ui::WaveformPanel waveformPanel;   // solo standalone, sopra la dashboard
     ma::ui::AlbumView albumView;           // solo standalone, al posto della dashboard
     ma::ui::StartView startView;           // solo standalone: schermata iniziale
@@ -168,6 +180,7 @@ private:
     double audioSilentSince = 0.0;
     bool audioWarningShown = false;
     juce::String shownOutputDevice { "-" };
+    std::unique_ptr<juce::ComponentListener> standaloneWindowWatcher;   // tiene largo il tasto "Audio setup"
 
     ma::ui::DashboardData data;
     ma::TargetProfile referenceProfile;

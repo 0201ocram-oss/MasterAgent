@@ -14,6 +14,8 @@
 #include "UI/SpectrumPanel.h"
 #include "UI/StereoPanel.h"
 #include "UI/StartView.h"
+#include "UI/DashboardLayout.h"
+#include "UI/VintagePanels.h"
 #include "UI/WaveformPanel.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -58,32 +60,60 @@ namespace
     public:
         Dashboard()
         {
-            for (auto* c : std::initializer_list<juce::Component*> { &header, &loudness, &peak, &dynamics, &spectrum, &stereo, &streaming, &report })
-                addAndMakeVisible (*c);
-            addChildComponent (waveform);
+            addAndMakeVisible (header);
+            for (auto* p : std::initializer_list<ma::ui::Panel*> { &loudness, &peak, &dynamics, &spectrum, &stereo, &meters, &tonalEq,
+                                                                    &analyzer, &scope, &streaming, &report, &waveform })
+                addChildComponent (p);
             addChildComponent (start);
             header.setTargets ({ { "pop", "Pop commerciale" } }, { { "loud", "Master forte (CD, club)" } }, { "pop", "loud" },
                                "Pop · Master forte"_u);
             header.setReferenceStatus ("reference_mix.wav", ma::ui::colours::reference, true, true);
             setSize (1440, 900);
+            updateLayout();
+        }
+
+        /** Stessi pannelli dell'editor del plugin. */
+        ma::ui::DashboardPanels panels()
+        {
+            ma::ui::DashboardPanels p;
+            p.loudness = &loudness;
+            p.peak = &peak;
+            p.dynamics = &dynamics;
+            p.spectrum = &spectrum;
+            p.stereo = &stereo;
+            p.meters = &meters;
+            p.tonalEq = &tonalEq;
+            p.analyzer = &analyzer;
+            p.scope = &scope;
+            p.streaming = &streaming;
+            p.report = &report;
+            p.waveform = standalone ? &waveform : nullptr;
+            return p;
         }
 
         void setData (const ma::ui::DashboardData& d)
         {
-            for (auto* p : std::initializer_list<ma::ui::Panel*> { &loudness, &peak, &dynamics, &spectrum, &stereo, &streaming, &report, &waveform })
+            for (auto* p : panels().all())
                 p->setData (d);
+            waveform.setData (d);
         }
 
         /** Come l'app standalone: forma d'onda sopra la dashboard, oppure la schermata iniziale. */
         void setStandalone (bool on, bool startScreen)
         {
             standalone = on;
+            startShown = on && startScreen;
             header.setStandalone (on);
-            start.setVisible (on && startScreen);
-            waveform.setVisible (on && ! startScreen);
-            for (auto* c : std::initializer_list<juce::Component*> { &loudness, &peak, &dynamics, &spectrum, &stereo, &streaming, &report })
-                c->setVisible (! (on && startScreen));
+            start.setVisible (startShown);
+            waveform.setVisible (false);
             setSize (1440, on ? 960 : 900);
+            updateLayout();
+        }
+
+        /** Visibilità e disposizione per lo stile e i pannelli scelti (dopo applyTheme). */
+        void updateLayout()
+        {
+            panels().setVisibility (! startShown, ma::ui::getUiSettings());
             resized();
             repaint();
         }
@@ -96,44 +126,22 @@ namespace
             if (! ma::ui::getUiSettings().effects)
                 return;
             const juce::DropShadow shadow (ma::ui::colours::shadow, 14, { 0, 4 });
-            for (auto* c : std::initializer_list<juce::Component*> { &loudness, &peak, &dynamics, &spectrum, &stereo, &streaming, &report, &waveform })
+            for (auto* c : panels().all())
             {
                 if (! c->isVisible())
                     continue;
                 juce::Path p;
-                p.addRoundedRectangle (c->getBounds().toFloat(), 10.0f);
+                p.addRoundedRectangle (c->getBounds().toFloat(), ma::ui::cornerRadius (10.0f));
                 shadow.drawForPath (g, p);
             }
         }
 
         void resized() override
         {
-            constexpr int gap = 12;
             auto r = getLocalBounds();
             header.setBounds (r.removeFromTop (60));
             start.setBounds (r);
-            r = r.reduced (12);
-            report.setBounds (r.removeFromRight ((int) (r.getWidth() * 0.27f)));
-            r.removeFromRight (gap);
-            if (standalone)
-            {
-                waveform.setBounds (r.removeFromTop (std::max (150, (int) (r.getHeight() * 0.19f))));
-                r.removeFromTop (gap);
-            }
-            auto row1 = r.removeFromTop ((int) (r.getHeight() * 0.34f));
-            r.removeFromTop (gap);
-            auto row3 = r.removeFromBottom (std::max (196, (int) (r.getHeight() * 0.3f)));
-            r.removeFromBottom (gap);
-            const int w1 = row1.getWidth() - 2 * gap;
-            loudness.setBounds (row1.removeFromLeft ((int) (w1 * 0.40f)));
-            row1.removeFromLeft (gap);
-            peak.setBounds (row1.removeFromLeft ((int) (w1 * 0.28f)));
-            row1.removeFromLeft (gap);
-            dynamics.setBounds (row1);
-            spectrum.setBounds (r.removeFromLeft ((int) ((r.getWidth() - gap) * 0.62f)));
-            r.removeFromLeft (gap);
-            stereo.setBounds (r);
-            streaming.setBounds (row3);
+            panels().layout (r, ma::ui::getUiSettings());
         }
 
         ma::ui::HeaderBar header;
@@ -142,11 +150,15 @@ namespace
         ma::ui::DynamicsPanel dynamics;
         ma::ui::SpectrumPanel spectrum;
         ma::ui::StereoPanel stereo;
+        ma::ui::MeterBridgePanel meters;
+        ma::ui::TonalEqPanel tonalEq;
+        ma::ui::AnalyzerPanel analyzer;
+        ma::ui::ScopePanel scope;
         ma::ui::StreamingPanel streaming;
         ma::ui::ReportPanel report;
         ma::ui::WaveformPanel waveform;
         ma::ui::StartView start;
-        bool standalone = false;
+        bool standalone = false, startShown = false;
     };
 }
 
@@ -170,9 +182,12 @@ int main (int argc, char* argv[])
 
     const juce::File outDir (argc > 1 ? juce::String (argv[1]) : juce::File::getCurrentWorkingDirectory().getFullPathName());
 
+    std::printf ("Bahnschrift: %s\n", juce::Font::findAllTypefaceStyles ("Bahnschrift").joinIntoString (", ").toRawUTF8());
+
     Dashboard dash;
     auto render = [&] (const juce::String& name)
     {
+        dash.updateLayout();
         dash.setData (data);
         const auto image = dash.createComponentSnapshot (dash.getLocalBounds(), true, 1.0f);
         const auto out = outDir.getChildFile (name);
@@ -299,6 +314,53 @@ int main (int argc, char* argv[])
             data.monitor = {};
         }
 
+        // menu Opzioni > Interfaccia: pannelli nascosti (gli altri prendono lo spazio) e stile vintage
+        {
+            auto renderUi = [&] (const ma::ui::UiSettings& ui, const juce::String& name)
+            {
+                ma::ui::applyTheme (ui);
+                lnf.refreshColours();
+                dash.sendLookAndFeelChange();
+                dash.header.setReferenceStatus ("reference_mix.wav", ma::ui::colours::reference, true, true);
+                render (name);
+            };
+
+            ma::ui::UiSettings ui;
+            ui.showReport = false;
+            renderUi (ui, "preview_no_report.png");
+            ui.showStreaming = false;
+            renderUi (ui, "preview_no_report_streaming.png");
+            ui.showReport = true;
+            renderUi (ui, "preview_no_streaming.png");
+
+            ui = {};
+            ui.style = ma::ui::UiStyle::vintage;
+            renderUi (ui, "preview_vintage.png");
+
+            data.highlightKey = ma::highlight::band (1);
+            data.highlightColour = ma::ui::colours::critical;
+            dash.header.setListening (true);
+            data.monitor = { ma::MonitorMode::mono, -1 };
+            renderUi (ui, "preview_vintage_highlight.png");
+            dash.header.setListening (false);
+            data.highlightKey = {};
+            data.monitor = {};
+
+            ui.showReport = false;
+            ui.showStreaming = false;
+            renderUi (ui, "preview_vintage_minimal.png");
+
+            // fase di mix: VU con lo 0 a -18 LUFS, ceiling dei picchi a -3 dBTP
+            ui.showReport = true;
+            data.phase = ma::WorkPhase::mix;
+            dash.header.setMixPhase (true);
+            renderUi (ui, "preview_vintage_mix.png");
+            dash.header.setMixPhase (false);
+            data.phase = ma::WorkPhase::master;
+
+            renderUi ({}, "preview_after_vintage.png");   // di nuovo classica: deve coincidere con preview.png
+        }
+
         // target broadcast (EBU R128, nessun genere): niente curva tonale, anteprima streaming solo indicativa
         {
             const auto* music = data.profile;
@@ -359,13 +421,16 @@ int main (int argc, char* argv[])
             view.setBounds (0, 0, 1416, 816);
             view.setData (data);
             view.setAlbum (album, { "06 Demo.wav (silenzio)" });
-            for (auto theme : { ma::ui::ThemeId::dark, ma::ui::ThemeId::light })
+            for (int variant = 0; variant < 3; ++variant)
             {
-                ma::ui::applyTheme ({ theme, ma::ui::AccentId::blue, true });
+                ma::ui::UiSettings ui { variant == 1 ? ma::ui::ThemeId::light : ma::ui::ThemeId::dark, ma::ui::AccentId::blue, true };
+                if (variant == 2)
+                    ui.style = ma::ui::UiStyle::vintage;
+                ma::ui::applyTheme (ui);
                 lnf.refreshColours();
                 view.sendLookAndFeelChange();
                 const auto image = view.createComponentSnapshot (view.getLocalBounds(), true, 1.0f);
-                const auto out = outDir.getChildFile (theme == ma::ui::ThemeId::dark ? "preview_album.png" : "preview_album_light.png");
+                const auto out = outDir.getChildFile (variant == 0 ? "preview_album.png" : variant == 1 ? "preview_album_light.png" : "preview_album_vintage.png");
                 out.deleteFile();
                 juce::FileOutputStream stream (out);
                 juce::PNGImageFormat().writeImageToStream (image, stream);
@@ -482,9 +547,26 @@ int main (int argc, char* argv[])
                 juce::FileOutputStream stream (out);
                 juce::PNGImageFormat().writeImageToStream (image, stream);
             }
+            // stile vintage nell'app: forma d'onda sopra i meter
+            {
+                ma::ui::UiSettings vintageUi;
+                vintageUi.style = ma::ui::UiStyle::vintage;
+                ma::ui::applyTheme (vintageUi);
+                lnf.refreshColours();
+                dash.sendLookAndFeelChange();
+                dash.updateLayout();
+                dash.setData (sdata);
+                const auto image = dash.createComponentSnapshot (dash.getLocalBounds(), true, 1.0f);
+                const auto out = outDir.getChildFile ("preview_standalone_vintage.png");
+                out.deleteFile();
+                juce::FileOutputStream stream (out);
+                juce::PNGImageFormat().writeImageToStream (image, stream);
+            }
+
             ma::ui::applyTheme ({});
             lnf.refreshColours();
             dash.sendLookAndFeelChange();
+            dash.updateLayout();
 
             // analisi in corso
             dash.waveform.setTimeline (nullptr);
@@ -508,6 +590,18 @@ int main (int argc, char* argv[])
                 dash.sendLookAndFeelChange();
                 const auto image = dash.createComponentSnapshot (dash.getLocalBounds(), true, 1.0f);
                 const auto out = outDir.getChildFile (theme == ma::ui::ThemeId::dark ? "preview_standalone_start.png" : "preview_standalone_start_light.png");
+                out.deleteFile();
+                juce::FileOutputStream stream (out);
+                juce::PNGImageFormat().writeImageToStream (image, stream);
+            }
+            {
+                ma::ui::UiSettings vintageUi;
+                vintageUi.style = ma::ui::UiStyle::vintage;
+                ma::ui::applyTheme (vintageUi);
+                lnf.refreshColours();
+                dash.sendLookAndFeelChange();
+                const auto image = dash.createComponentSnapshot (dash.getLocalBounds(), true, 1.0f);
+                const auto out = outDir.getChildFile ("preview_standalone_start_vintage.png");
                 out.deleteFile();
                 juce::FileOutputStream stream (out);
                 juce::PNGImageFormat().writeImageToStream (image, stream);
@@ -568,7 +662,9 @@ int main (int argc, char* argv[])
                                  "panel:album", "album:summary", "album:row", "album:median", "album:integrated", "album:loudest",
                                  "album:delta", "album:gain", "album:tp", "album:width", "album:status", "album:details",
                                  "album:tonalChart", "album:band:0", "album:band:7", "album:add", "album:pending", "album:remove",
-                                 "panel:waveform", "wave:overview", "wave:legend", "wave:transport" })
+                                 "panel:waveform", "wave:overview", "wave:legend", "wave:transport",
+                                 "panel:meters", "panel:tonalEq", "panel:analyzer", "panel:scope", "vu:loudness", "vu:peak",
+                                 "vu:phase", "vu:over", "eq:graphic", "rta", "monitor" })
             if (ma::ui::helpTextFor (key).isEmpty())
             {
                 std::printf ("testo guida mancante: %s\n", key);

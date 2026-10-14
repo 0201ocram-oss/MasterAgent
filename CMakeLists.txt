@@ -98,6 +98,9 @@ target_sources(MasterAgent PRIVATE
     Source/UI/AlbumView.cpp
     Source/UI/WaveformPanel.cpp
     Source/UI/StartView.cpp
+    Source/UI/Vintage.cpp
+    Source/UI/VintagePanels.cpp
+    Source/UI/DashboardLayout.cpp
     Source/Playback/FilePlayer.cpp)
 
 target_include_directories(MasterAgent PRIVATE Source)
@@ -185,6 +188,9 @@ if(MASTERAGENT_BUILD_TESTS)
         Source/UI/AlbumView.cpp
         Source/UI/WaveformPanel.cpp
         Source/UI/StartView.cpp
+        Source/UI/Vintage.cpp
+        Source/UI/VintagePanels.cpp
+        Source/UI/DashboardLayout.cpp
         tools/Preview.cpp)
 
     target_include_directories(MasterAgentPreview PRIVATE Source)

@@ -1,4 +1,5 @@
 #include "HeaderBar.h"
+#include "Vintage.h"
 #include "../Common/Text.h"
 
 namespace ma::ui
@@ -51,10 +52,11 @@ void TargetButton::paintButton (juce::Graphics& g, bool isMouseOver, bool isButt
     auto& lf = getLookAndFeel();
     const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
     const auto fill = lf.findColour (juce::ComboBox::backgroundColourId);
+    const float radius = cornerRadius (7.0f);
     g.setColour (isButtonDown ? hoverTint (fill, 0.1f) : isMouseOver ? hoverTint (fill, 0.05f) : fill);
-    g.fillRoundedRectangle (bounds, 7.0f);
+    g.fillRoundedRectangle (bounds, radius);
     g.setColour (colours::line);
-    g.drawRoundedRectangle (bounds, 7.0f, 1.0f);
+    g.drawRoundedRectangle (bounds, radius, 1.0f);
 
     juce::Path arrow;
     const float cx = (float) getWidth() - 16.0f, cy = getHeight() * 0.5f;
@@ -65,7 +67,7 @@ void TargetButton::paintButton (juce::Graphics& g, bool isMouseOver, bool isButt
     g.strokePath (arrow, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     g.setColour (lf.findColour (juce::ComboBox::textColourId));
-    g.setFont (juce::Font (juce::FontOptions (13.5f)));
+    g.setFont (fonts::label (13.5f));
     g.drawFittedText (getButtonText(), getLocalBounds().withTrimmedLeft (10).withTrimmedRight (30),
                       juce::Justification::centredLeft, 1, 0.8f);
 }
@@ -176,6 +178,13 @@ void HeaderBar::paint (juce::Graphics& g)
 {
     g.setGradientFill (juce::ColourGradient (colours::headerTop, 0.0f, 0.0f, colours::headerBottom, 0.0f, (float) getHeight(), false));
     g.fillRect (getLocalBounds());
+
+    if (isVintage())
+    {
+        paintVintage (g);
+        return;
+    }
+
     g.setColour (colours::line.withMultipliedAlpha (0.6f));
     g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
 
@@ -196,9 +205,44 @@ void HeaderBar::paint (juce::Graphics& g)
 
     // separatori verticali tra i gruppi
     g.setColour (colours::line.withMultipliedAlpha (0.7f));
-    for (auto* c : std::initializer_list<juce::Component*> { standalone ? (juce::Component*) &newAnalysisButton : &wholeSongButton,
-                                                              &mixButton, &loadRefButton, &optionsButton, &helpButton })
+    for (auto* c : separatedControls())
         g.fillRect (c->getX() - groupGap / 2 - 1, 14, 1, getHeight() - 28);
+}
+
+std::vector<juce::Component*> HeaderBar::separatedControls()
+{
+    return { standalone ? (juce::Component*) &newAnalysisButton : &wholeSongButton, &mixButton, &loadRefButton, &optionsButton, &helpButton };
+}
+
+void HeaderBar::paintVintage (juce::Graphics& g)
+{
+    // frontalino: luce sul bordo alto, ombra sotto
+    g.setColour (juce::Colours::white.withAlpha (0.1f));
+    g.drawHorizontalLine (0, 0.0f, (float) getWidth());
+    g.setColour (juce::Colours::black.withAlpha (0.8f));
+    g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
+
+    // logo: spia d'accensione ambra e marchio serigrafato
+    auto r = getLocalBounds().reduced (16, 0);
+    const auto lamp = r.removeFromLeft (22).toFloat();
+    vintage::drawLamp (g, lamp.getCentre(), 5.0f, colours::accent, true);
+    r.removeFromLeft (8);
+    g.setFont (vintage::silkscreen (14.5f));
+    g.setColour (colours::text);
+    const float masterW = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), "MASTER");
+    g.drawText ("MASTER", r.removeFromLeft ((int) masterW + 4), juce::Justification::centredLeft);
+    g.setColour (colours::accent);
+    g.drawText ("AGENT", r.removeFromLeft (70), juce::Justification::centredLeft);
+
+    // separatori incisi
+    for (auto* c : separatedControls())
+    {
+        const int x = c->getX() - groupGap / 2 - 1;
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        g.fillRect (x, 12, 1, getHeight() - 24);
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.fillRect (x + 1, 12, 1, getHeight() - 24);
+    }
 }
 
 void HeaderBar::resized()

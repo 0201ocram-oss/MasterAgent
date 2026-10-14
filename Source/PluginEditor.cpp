@@ -56,8 +56,8 @@ MasterAgentEditor::MasterAgentEditor (MasterAgentProcessor& p)
     content.setLookAndFeel (&lookAndFeel);
     addAndMakeVisible (content);
     content.addAndMakeVisible (header);
-    for (auto* panel : allPanels())
-        content.addAndMakeVisible (panel);
+    for (auto* panel : dashboardPanels().all())
+        content.addChildComponent (panel);
     content.addChildComponent (waveformPanel);
     content.addChildComponent (albumView);
     content.addChildComponent (startView);
@@ -193,7 +193,8 @@ MasterAgentEditor::MasterAgentEditor (MasterAgentProcessor& p)
     // monitor d'ascolto: selettore dello stereo, bande dello spettro, "Ascolta il problema" nel report
     data.monitor = processor.getMonitor().getChoice();
     stereoPanel.onMonitorChanged = [this] (MonitorChoice choice) { setMonitor (choice); };
-    spectrumPanel.onSoloBand = [this] (int band)
+    scopePanel.onMonitorChanged = [this] (MonitorChoice choice) { setMonitor (choice); };
+    spectrumPanel.onSoloBand = tonalEqPanel.onSoloBand = [this] (int band)
     {
         const MonitorChoice choice { MonitorMode::band, band };
         setMonitor (data.monitor == choice ? MonitorChoice() : choice);
@@ -220,6 +221,10 @@ MasterAgentEditor::MasterAgentEditor (MasterAgentProcessor& p)
         content.setWantsKeyboardFocus (true);
         showScreen (processor.getMasterFileState() != MasterAgentProcessor::MasterFileState::none ? Screen::track : Screen::start);
     }
+    else
+    {
+        showScreen (Screen::track);
+    }
 
     setResizable (true, true);
     setSize (processor.editorWidth, processor.editorHeight);
@@ -236,9 +241,29 @@ MasterAgentEditor::~MasterAgentEditor()
     content.setLookAndFeel (nullptr);
 }
 
-std::array<Panel*, 7> MasterAgentEditor::allPanels()
+DashboardPanels MasterAgentEditor::dashboardPanels()
 {
-    return { &loudnessPanel, &peakPanel, &dynamicsPanel, &spectrumPanel, &stereoPanel, &streamingPanel, &reportPanel };
+    DashboardPanels p;
+    p.loudness = &loudnessPanel;
+    p.peak = &peakPanel;
+    p.dynamics = &dynamicsPanel;
+    p.spectrum = &spectrumPanel;
+    p.stereo = &stereoPanel;
+    p.meters = &meterPanel;
+    p.tonalEq = &tonalEqPanel;
+    p.analyzer = &analyzerPanel;
+    p.scope = &scopePanel;
+    p.streaming = &streamingPanel;
+    p.report = &reportPanel;
+    p.waveform = standalone ? &waveformPanel : nullptr;
+    return p;
+}
+
+void MasterAgentEditor::updatePanelLayout()
+{
+    dashboardPanels().setVisibility (screen == Screen::track, getUiSettings());
+    layoutDashboard();
+    content.repaint();
 }
 
 void MasterAgentEditor::paint (juce::Graphics& g)
@@ -332,15 +357,12 @@ void MasterAgentEditor::paintDashboard (juce::Graphics& g)
         if (getUiSettings().effects)
         {
             const juce::DropShadow shadow (colours::shadow, 14, { 0, 4 });
-            const auto dashboardPanels = allPanels();
-            auto panels = std::vector<Panel*> (dashboardPanels.begin(), dashboardPanels.end());
-            panels.push_back (&waveformPanel);
-            for (auto* panel : panels)
+            for (auto* panel : dashboardPanels().all())
             {
                 if (! panel->isVisible())
                     continue;
                 juce::Path p;
-                p.addRoundedRectangle (panel->getBounds().toFloat(), 10.0f);
+                p.addRoundedRectangle (panel->getBounds().toFloat(), cornerRadius (10.0f));
                 shadow.drawForPath (bg, p);
             }
         }
@@ -459,38 +481,10 @@ void MasterAgentEditor::layoutDashboard()
     r.removeFromTop (bannerHeight * bannerCount());
     startView.setBounds (r);
 
-    r = r.reduced (12);
-    constexpr int gap = 12;
-    albumView.setBounds (r);
+    albumView.setBounds (r.reduced (12));
 
-    reportPanel.setBounds (r.removeFromRight ((int) (r.getWidth() * 0.27f)));
-    r.removeFromRight (gap);
-
-    // standalone: la forma d'onda del brano sopra i pannelli di misura
-    if (standalone)
-    {
-        waveformPanel.setBounds (r.removeFromTop (std::max (150, (int) (r.getHeight() * 0.19f))));
-        r.removeFromTop (gap);
-    }
-
-    auto row1 = r.removeFromTop ((int) (r.getHeight() * 0.34f));
-    r.removeFromTop (gap);
-    auto row3 = r.removeFromBottom (std::max (196, (int) (r.getHeight() * 0.3f)));
-    r.removeFromBottom (gap);
-    auto row2 = r;
-
-    const int w1 = row1.getWidth() - 2 * gap;
-    loudnessPanel.setBounds (row1.removeFromLeft ((int) (w1 * 0.40f)));
-    row1.removeFromLeft (gap);
-    peakPanel.setBounds (row1.removeFromLeft ((int) (w1 * 0.28f)));
-    row1.removeFromLeft (gap);
-    dynamicsPanel.setBounds (row1);
-
-    spectrumPanel.setBounds (row2.removeFromLeft ((int) ((row2.getWidth() - gap) * 0.62f)));
-    row2.removeFromLeft (gap);
-    stereoPanel.setBounds (row2);
-
-    streamingPanel.setBounds (row3);
+    // pannelli nascosti dal menu: gli altri si allargano, la finestra resta com'è
+    dashboardPanels().layout (r, getUiSettings());
 }
 
 int MasterAgentEditor::bannerCount() const
@@ -533,6 +527,7 @@ void MasterAgentEditor::refreshTheme()
     if (! juce::approximatelyEqual (appliedZoom, getUiSettings().zoom()))
         applyZoom();
     content.sendLookAndFeelChange();   // header e report rileggono i colori dei loro controlli
+    updatePanelLayout();               // stile e pannelli scelti dal menu
     updateReferenceStatus();
     pushDataToPanels();
     content.repaint();
@@ -778,9 +773,8 @@ void MasterAgentEditor::updateComparison()
 
 void MasterAgentEditor::pushDataToPanels()
 {
-    for (auto* panel : allPanels())
+    for (auto* panel : dashboardPanels().all())   // forma d'onda compresa (standalone)
         panel->setData (data);
-    waveformPanel.setData (data);
     albumView.setData (data);
 }
 
@@ -797,6 +791,7 @@ void MasterAgentEditor::timerCallback()
         updateWaveform();
         updatePlayback();
         checkAudioOutput();
+        setupStandaloneWindow();
     }
     else
     {
@@ -843,10 +838,12 @@ void MasterAgentEditor::timerCallback()
             content.repaint (0, headerHeight, content.getWidth(), bannerHeight * bannerCount());
     }
 
-    // con l'album o la schermata iniziale la dashboard è nascosta: non serve ridisegnarla
+    // pannelli con valori in tempo reale; nascosti (album, schermata iniziale, altro stile) non serve ridisegnarli
     if (screen == Screen::track)
-        for (auto* panel : { (Panel*) &loudnessPanel, (Panel*) &peakPanel, (Panel*) &dynamicsPanel, (Panel*) &spectrumPanel, (Panel*) &stereoPanel })
-            panel->setData (data);
+        for (auto* panel : { (Panel*) &loudnessPanel, (Panel*) &peakPanel, (Panel*) &dynamicsPanel, (Panel*) &spectrumPanel, (Panel*) &stereoPanel,
+                             (Panel*) &meterPanel, (Panel*) &tonalEqPanel, (Panel*) &analyzerPanel, (Panel*) &scopePanel })
+            if (panel->isVisible())
+                panel->setData (data);
 }
 
 //==============================================================================
@@ -873,9 +870,7 @@ void MasterAgentEditor::showScreen (Screen newScreen)
 
     startView.setVisible (screen == Screen::start);
     albumView.setVisible (screen == Screen::album);
-    for (auto* panel : allPanels())
-        panel->setVisible (track);
-    waveformPanel.setVisible (track && standalone);
+    dashboardPanels().setVisibility (track, getUiSettings());
 
     if (! track)
         processor.getPlayer().pause();
@@ -1020,6 +1015,54 @@ void MasterAgentEditor::checkAudioOutput()
                                         }));
 }
 
+void MasterAgentEditor::setupStandaloneWindow()
+{
+    // la finestra dell'app (JUCE) ha in alto il tasto "Options", che apre solo le impostazioni della scheda audio
+    if (standaloneWindowWatcher != nullptr)
+        return;
+    auto* window = dynamic_cast<juce::StandaloneFilterWindow*> (getTopLevelComponent());
+    if (window == nullptr)
+        return;
+
+    juce::TextButton* options = nullptr;
+    for (auto* child : window->getChildren())
+        if (auto* button = dynamic_cast<juce::TextButton*> (child); button != nullptr && button->getButtonText() == "Options")
+            options = button;
+    if (options == nullptr)
+        return;
+
+    options->setButtonText ("Audio setup");
+    options->setTooltip ("Scheda audio: uscita, frequenza di campionamento e buffer"_t);
+
+    // la finestra rimette la larghezza originale a ogni ridimensionamento: la si riallarga subito dopo
+    struct Watcher : juce::ComponentListener
+    {
+        Watcher (juce::Component& w, juce::TextButton& b) : window (&w), button (&b)
+        {
+            window->addComponentListener (this);
+            fit();
+        }
+        ~Watcher() override
+        {
+            if (window != nullptr)
+                window->removeComponentListener (this);
+        }
+        void componentMovedOrResized (juce::Component&, bool, bool wasResized) override
+        {
+            if (wasResized)
+                fit();
+        }
+        void fit()
+        {
+            if (button != nullptr)
+                button->setSize (std::max (button->getWidth(), button->getBestWidthForHeight (button->getHeight()) + 8), button->getHeight());
+        }
+        juce::Component::SafePointer<juce::Component> window;
+        juce::Component::SafePointer<juce::TextButton> button;
+    };
+    standaloneWindowWatcher = std::make_unique<Watcher> (*window, *options);
+}
+
 void MasterAgentEditor::updatePlayback()
 {
     // in ascolto i valori istantanei (momentary, short-term, picchi recenti, spettro, correlazione, goniometro)
@@ -1086,11 +1129,9 @@ namespace
 juce::Image MasterAgentEditor::createMeasurementsImage()
 {
     juce::Rectangle<int> area;
-    for (auto* panel : allPanels())
+    for (auto* panel : dashboardPanels().all())
         if (panel != &reportPanel && panel->isVisible())
             area = area.isEmpty() ? panel->getBounds() : area.getUnion (panel->getBounds());
-    if (waveformPanel.isVisible())
-        area = area.getUnion (waveformPanel.getBounds());
 
     if (area.isEmpty())
         return {};
@@ -1284,9 +1325,35 @@ void MasterAgentEditor::showOptionsMenu()
             changeUiSettings (s);
         });
 
+    // stile e pannelli non essenziali: la finestra resta della stessa dimensione, gli altri pannelli prendono lo spazio
+    juce::PopupMenu styleMenu, viewMenu;
+    for (auto style : { UiStyle::classic, UiStyle::vintage })
+        styleMenu.addItem (styleName (style), true, ui.style == style, [this, ui, style]
+        {
+            auto s = ui;
+            s.style = style;
+            changeUiSettings (s);
+        });
+    viewMenu.addItem ("Anteprima normalizzazione streaming"_t, true, ui.showStreaming, [this, ui]
+    {
+        auto s = ui;
+        s.showStreaming = ! s.showStreaming;
+        changeUiSettings (s);
+    });
+    viewMenu.addItem ("Report e diagnosi"_t, true, ui.showReport, [this, ui]
+    {
+        auto s = ui;
+        s.showReport = ! s.showReport;
+        changeUiSettings (s);
+    });
+
+    const bool vintageStyle = ui.style == UiStyle::vintage;
     menu.addSectionHeader ("Interfaccia");
-    menu.addSubMenu ("Tema: " + themeName (ui.theme), themeMenu);
-    menu.addSubMenu ("Colore accento: " + accentName (ui.accent), accentMenu);
+    menu.addSubMenu ("Stile interfaccia: "_t + styleName (ui.style), styleMenu);
+    menu.addSubMenu ("Visualizzazione"_t, viewMenu);
+    // lo stile vintage ha i suoi colori
+    menu.addSubMenu ("Tema: " + themeName (ui.theme), themeMenu, ! vintageStyle);
+    menu.addSubMenu ("Colore accento: " + accentName (ui.accent), accentMenu, ! vintageStyle);
 
     juce::PopupMenu zoomMenu;
     for (int step : kZoomSteps)

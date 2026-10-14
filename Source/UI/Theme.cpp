@@ -1,5 +1,6 @@
 #include "Theme.h"
 #include "HelpTexts.h"
+#include "Vintage.h"
 #include "../Common/Text.h"
 
 #include "MasterAgentLang.h"
@@ -11,9 +12,13 @@ namespace ma::ui
 
 namespace fonts
 {
-    juce::Font label (float size)  { return juce::Font (juce::FontOptions (size)); }
-    juce::Font value (float size)  { return juce::Font (juce::FontOptions (size, juce::Font::bold)); }
-    juce::Font title()             { return juce::Font (juce::FontOptions (11.0f, juce::Font::bold)).withExtraKerningFactor (0.08f); }
+    juce::Font label (float size)  { return isVintage() ? vintage::font (size) : juce::Font (juce::FontOptions (size)); }
+    juce::Font value (float size)  { return isVintage() ? vintage::font (size, true) : juce::Font (juce::FontOptions (size, juce::Font::bold)); }
+    juce::Font title()
+    {
+        return isVintage() ? vintage::silkscreen (11.5f)
+                           : juce::Font (juce::FontOptions (11.0f, juce::Font::bold)).withExtraKerningFactor (0.08f);
+    }
 }
 
 //==============================================================================
@@ -110,6 +115,26 @@ namespace
         liveOn = juce::Colour (0xfffbe3b8);
     }
 
+    void setVintagePalette()
+    {
+        // frontalini in metallo scuro caldo, serigrafie crema, LED ambra; i pulsanti accesi danno il colore alla spia
+        using namespace colours;
+        backgroundTop = juce::Colour (0xff1e1a16);  backgroundBottom = juce::Colour (0xff12100d);  background = juce::Colour (0xff181511);
+        panelTop = juce::Colour (0xff37322b);       panelBottom = juce::Colour (0xff2a2621);       panel = juce::Colour (0xff312c26);
+        panelBorder = juce::Colour (0x99000000);    well = juce::Colour (0xff0e0c0a);
+        grid = juce::Colour (0xff3e382f);           axis = juce::Colour (0xff5a5144);
+        text = juce::Colour (0xfff1e6cc);           textDim = juce::Colour (0xffc2b292);           textFaint = juce::Colour (0xff8a7e69);
+        accent = juce::Colour (0xffffa830);         accent2 = juce::Colour (0xffe8803e);           accentDim = juce::Colour (0xff6e4a1c);
+        reference = juce::Colour (0xffd9a8ea);      target = juce::Colour (0xffeed67e);
+        ok = juce::Colour (0xff86dc5c);             info = juce::Colour (0xff80bce4);
+        warning = juce::Colour (0xffffcc3a);        critical = juce::Colour (0xffff5a3a);
+        headerTop = juce::Colour (0xff3c362f);      headerBottom = juce::Colour (0xff2b2621);
+        line = juce::Colour (0x2af1e6cc);           stripe = juce::Colour (0x0cf1e6cc);
+        button = juce::Colour (0xff4d463d);         popup = juce::Colour (0xff2d2822);             tooltip = juce::Colour (0xff38322b);
+        hover = juce::Colour (0xff3b352d);          readout = juce::Colour (0xee2d2822);           shadow = juce::Colour (0x99000000);
+        liveOn = juce::Colour (0xff8c2a1c);         mixOn = juce::Colour (0xff2f6a2a);             listenOn = juce::Colour (0xff6c3c7e);
+    }
+
     juce::File settingsFile()
     {
         return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
@@ -165,6 +190,11 @@ juce::String accentName (AccentId id)
     return {};
 }
 
+juce::String styleName (UiStyle style)
+{
+    return style == UiStyle::vintage ? "Vintage"_t : "Classica"_t;
+}
+
 juce::String languageName (Language l)
 {
     // ogni lingua col suo nome, così si riconosce anche senza capire l'altra
@@ -192,6 +222,14 @@ void applyTheme (const UiSettings& settings)
 {
     currentSettings = settings;
     applyLanguage (settings.language);
+
+    // lo stile vintage ha la sua palette: tema e accento restano salvati per quando si torna alla classica
+    if (settings.style == UiStyle::vintage)
+    {
+        setVintagePalette();
+        ++themeVersion;
+        return;
+    }
 
     switch (settings.theme)
     {
@@ -227,8 +265,14 @@ void applyTheme (const UiSettings& settings)
 }
 
 const UiSettings& getUiSettings()  { return currentSettings; }
-bool isLightTheme()                { return currentSettings.theme == ThemeId::light; }
+bool isVintage()                   { return currentSettings.style == UiStyle::vintage; }
+bool isLightTheme()                { return currentSettings.theme == ThemeId::light && ! isVintage(); }
 int getThemeVersion()              { return themeVersion; }
+
+float cornerRadius (float classicRadius)
+{
+    return isVintage() ? std::min (classicRadius, 3.0f) : classicRadius;
+}
 
 UiSettings loadUiSettings()
 {
@@ -240,6 +284,9 @@ UiSettings loadUiSettings()
         s.effects = xml->getBoolAttribute ("effects", true);
         s.language = xml->getIntAttribute ("language", 0) == 1 ? Language::english : Language::italian;
         s.spectrumMidSide = xml->getBoolAttribute ("spectrumMidSide", false);
+        s.style = xml->getIntAttribute ("style", 0) == 1 ? UiStyle::vintage : UiStyle::classic;
+        s.showStreaming = xml->getBoolAttribute ("showStreaming", true);
+        s.showReport = xml->getBoolAttribute ("showReport", true);
 
         const int zoom = xml->getIntAttribute ("zoom", 100);
         for (int step : kZoomSteps)
@@ -258,6 +305,9 @@ void saveUiSettings (const UiSettings& s)
     xml.setAttribute ("zoom", s.zoomPercent);
     xml.setAttribute ("language", (int) s.language);
     xml.setAttribute ("spectrumMidSide", s.spectrumMidSide);
+    xml.setAttribute ("style", (int) s.style);
+    xml.setAttribute ("showStreaming", s.showStreaming);
+    xml.setAttribute ("showReport", s.showReport);
 
     const auto file = settingsFile();
     file.getParentDirectory().createDirectory();
@@ -347,7 +397,35 @@ void LookAndFeel::refreshColours()
 
 juce::Font LookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeight)
 {
+    if (isVintage())
+        return vintage::font (std::min (12.5f, buttonHeight * 0.46f), true).withExtraKerningFactor (0.05f);
     return juce::Font (juce::FontOptions (std::min (13.5f, buttonHeight * 0.5f), juce::Font::bold));
+}
+
+namespace
+{
+    /** Vintage: i tasti che restano accesi (interruttori, selettori) hanno una spia a sinistra, se c'è spazio. */
+    bool hasVintageLamp (const juce::Button& button)
+    {
+        return button.getClickingTogglesState() && button.getWidth() >= 44;
+    }
+
+    void drawVintageKey (juce::Graphics& g, juce::Button& button, juce::Colour base, bool isMouseOver, bool isButtonDown)
+    {
+        const auto bounds = button.getLocalBounds().toFloat().reduced (0.5f);
+        const bool on = button.getToggleState();
+
+        if (! button.isEnabled())
+            base = base.withMultipliedAlpha (0.5f);
+        else if (isMouseOver)
+            base = base.brighter (0.08f);
+
+        vintage::drawKey (g, bounds, base, isButtonDown || on, button.isConnectedOnLeft(), button.isConnectedOnRight());
+
+        if (hasVintageLamp (button))
+            vintage::drawLamp (g, { bounds.getX() + 10.0f, bounds.getCentreY() }, 3.2f,
+                               vintage::lampColour (button.findColour (juce::TextButton::buttonOnColourId)), on);
+    }
 }
 
 juce::Font LookAndFeel::getComboBoxFont (juce::ComboBox&)
@@ -363,6 +441,12 @@ juce::Font LookAndFeel::getPopupMenuFont()
 void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour,
                                         bool isMouseOverButton, bool isButtonDown)
 {
+    if (isVintage())
+    {
+        drawVintageKey (g, button, backgroundColour, isMouseOverButton, isButtonDown);
+        return;
+    }
+
     auto bounds = button.getLocalBounds().toFloat().reduced (0.5f);
     const float radius = 7.0f;
 
@@ -390,14 +474,35 @@ void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button,
     g.strokePath (p, juce::PathStrokeType (1.0f));
 }
 
+void LookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool isMouseOverButton, bool isButtonDown)
+{
+    if (! isVintage())
+    {
+        LookAndFeel_V4::drawButtonText (g, button, isMouseOverButton, isButtonDown);
+        return;
+    }
+
+    // serigrafia in maiuscolo; il tasto premuto scende di un pixel
+    g.setFont (getTextButtonFont (button, button.getHeight()));
+    g.setColour (button.findColour (button.getToggleState() ? juce::TextButton::textColourOnId : juce::TextButton::textColourOffId)
+                     .withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f));
+    auto area = button.getLocalBounds().reduced (4, 2);
+    if (hasVintageLamp (button))
+        area.removeFromLeft (14);
+    if (isButtonDown || button.getToggleState())
+        area.translate (0, 1);
+    g.drawFittedText (button.getButtonText().toUpperCase(), area, juce::Justification::centred, 1, 0.75f);
+}
+
 void LookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool, int, int, int, int, juce::ComboBox& box)
 {
     const auto bounds = juce::Rectangle<float> (0.0f, 0.0f, (float) width, (float) height).reduced (0.5f);
     const auto fill = box.findColour (juce::ComboBox::backgroundColourId);
+    const float radius = cornerRadius (7.0f);
     g.setColour (box.isMouseOver() ? hoverTint (fill, 0.05f) : fill);
-    g.fillRoundedRectangle (bounds, 7.0f);
+    g.fillRoundedRectangle (bounds, radius);
     g.setColour (colours::line);
-    g.drawRoundedRectangle (bounds, 7.0f, 1.0f);
+    g.drawRoundedRectangle (bounds, radius, 1.0f);
 
     juce::Path arrow;
     const float cx = (float) width - 16.0f, cy = height * 0.5f;
@@ -538,16 +643,18 @@ juce::String Panel::getTooltip()
 
 void Panel::fillWell (juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
+    radius = cornerRadius (radius);
     g.setColour (colours::well);
     g.fillRoundedRectangle (r, radius);
-    g.setColour (colours::line.withMultipliedAlpha (0.4f));
+    g.setColour (isVintage() ? juce::Colours::black.withAlpha (0.6f) : colours::line.withMultipliedAlpha (0.4f));
     g.drawRoundedRectangle (r.reduced (0.5f), radius, 1.0f);
 }
 
 void Panel::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
-    constexpr float radius = 10.0f;
+    const bool vintageStyle = isVintage();
+    const float radius = cornerRadius (10.0f);
 
     if (getUiSettings().effects)
         g.setGradientFill (juce::ColourGradient (colours::panelTop, 0.0f, 0.0f, colours::panelBottom, 0.0f, bounds.getBottom(), false));
@@ -555,24 +662,51 @@ void Panel::paint (juce::Graphics& g)
         g.setColour (colours::panel);
     g.fillRoundedRectangle (bounds, radius);
 
-    // titolo con punto accento
     auto titleArea = bounds.reduced (14.0f, 10.0f).removeFromTop (16.0f);
-    g.setColour (colours::accent);
-    g.fillEllipse (titleArea.removeFromLeft (6.0f).withSizeKeepingCentre (6.0f, 6.0f));
-    titleArea.removeFromLeft (8.0f);
+    if (vintageStyle)
+    {
+        // frontalino da rack: quattro viti negli angoli, il titolo parte dopo la vite
+        const float inset = 7.5f;
+        const float angle = (float) (title.hashCode() % 7) * 0.45f;
+        int corner = 0;
+        for (auto p : { bounds.getTopLeft(), bounds.getTopRight(), bounds.getBottomLeft(), bounds.getBottomRight() })
+        {
+            const float sx = p.x < bounds.getCentreX() ? inset : -inset, sy = p.y < bounds.getCentreY() ? inset : -inset;
+            vintage::drawScrew (g, p.translated (sx, sy), 3.2f, angle + (float) corner++ * 1.1f);
+        }
+        titleArea.removeFromLeft (6.0f);
+    }
+    else
+    {
+        // titolo con punto accento
+        g.setColour (colours::accent);
+        g.fillEllipse (titleArea.removeFromLeft (6.0f).withSizeKeepingCentre (6.0f, 6.0f));
+        titleArea.removeFromLeft (8.0f);
+    }
 
     if (badge.isNotEmpty())
     {
         g.setFont (fonts::value (10.0f));
         const float w = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), badge) + 14.0f;
-        auto b = titleArea.removeFromRight (w).withSizeKeepingCentre (w, 16.0f);
-        g.setColour (badgeColour.withAlpha (0.16f));
-        g.fillRoundedRectangle (b, 8.0f);
-        g.setColour (badgeColour);
-        g.drawText (badge, b, juce::Justification::centred);
+        if (vintageStyle)
+        {
+            // spia accesa con la scritta accanto
+            auto b = titleArea.removeFromRight (w + 6.0f);
+            vintage::drawLamp (g, { b.getX() + 4.0f, b.getCentreY() }, 3.0f, vintage::lampColour (badgeColour), true);
+            g.setColour (colours::text);
+            g.drawText (badge, b.withTrimmedLeft (11.0f), juce::Justification::centredLeft);
+        }
+        else
+        {
+            auto b = titleArea.removeFromRight (w).withSizeKeepingCentre (w, 16.0f);
+            g.setColour (badgeColour.withAlpha (0.16f));
+            g.fillRoundedRectangle (b, 8.0f);
+            g.setColour (badgeColour);
+            g.drawText (badge, b, juce::Justification::centred);
+        }
     }
 
-    g.setColour (colours::textDim);
+    g.setColour (vintageStyle ? colours::text.withAlpha (0.85f) : colours::textDim);
     g.setFont (fonts::title());
     g.drawText (title.toUpperCase(), titleArea, juce::Justification::centredLeft);
 
@@ -588,6 +722,14 @@ void Panel::paint (juce::Graphics& g)
         g.drawRoundedRectangle (bounds.reduced (1.0f), radius, 3.0f);
         g.setColour (data->highlightColour.withAlpha (0.8f));
         g.drawRoundedRectangle (bounds, radius, 1.2f);
+    }
+    else if (vintageStyle)
+    {
+        // smusso: luce sul bordo superiore, bordo scuro tutt'intorno
+        g.setColour (juce::Colours::white.withAlpha (0.09f));
+        g.drawHorizontalLine ((int) bounds.getY() + 1, bounds.getX() + radius, bounds.getRight() - radius);
+        g.setColour (colours::panelBorder);
+        g.drawRoundedRectangle (bounds, radius, 1.0f);
     }
     else
     {

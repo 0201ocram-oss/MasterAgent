@@ -61,6 +61,12 @@ enum class ThemeId  { dark, light, graphite, highContrast };
 enum class AccentId { blue, teal, indigo, silver };
 enum class Language { italian, english };
 
+/**
+    Stile dell'interfaccia. Classica: tutti i grafici e i valori. Vintage: solo i parametri base, con VU meter
+    ad ago, display a sette segmenti, EQ a bande e tasti con spia; ha una palette propria (tema e accento non contano).
+*/
+enum class UiStyle  { classic, vintage };
+
 /** Dimensioni dell'interfaccia proposte nel menu (percentuale). */
 constexpr std::array<int, 6> kZoomSteps { 75, 85, 100, 115, 130, 150 };
 
@@ -72,6 +78,11 @@ struct UiSettings
     int zoomPercent = 100;
     Language language = Language::italian;
     bool spectrumMidSide = false;   // spettro: vista Mid/Side invece di L+R
+    UiStyle style = UiStyle::classic;
+
+    // pannelli non essenziali (menu Opzioni > Visualizzazione): nascosti, lasciano il posto agli altri
+    bool showStreaming = true;
+    bool showReport = true;
 
     float zoom() const noexcept { return (float) zoomPercent / 100.0f; }
 
@@ -81,11 +92,16 @@ struct UiSettings
 juce::String themeName (ThemeId);
 juce::String accentName (AccentId);
 juce::String languageName (Language);
+juce::String styleName (UiStyle);
 
 /** Imposta palette e lingua. Aggiorna anche il numero di versione del tema. */
 void applyTheme (const UiSettings&);
 const UiSettings& getUiSettings();
 bool isLightTheme();
+bool isVintage();
+
+/** Raggio degli angoli: lo stile vintage ha spigoli quasi vivi, come i frontalini dei rack. */
+float cornerRadius (float classicRadius);
 
 /** Cresce a ogni applyTheme(): chi tiene in cache layout o immagini colorate lo confronta per rigenerarli. */
 int getThemeVersion();
@@ -97,6 +113,7 @@ void saveUiSettings (const UiSettings&);
 /** Colore per l'hover: più chiaro sui temi scuri, più scuro su quello chiaro. */
 juce::Colour hoverTint (juce::Colour c, float amount);
 
+/** Caratteri dell'interfaccia: Segoe UI, oppure Bahnschrift (stile DIN dei frontalini) nello stile vintage. */
 namespace fonts
 {
     juce::Font label (float size = 11.0f);
@@ -163,8 +180,10 @@ public:
     juce::Font getComboBoxFont (juce::ComboBox&) override;
     juce::Font getPopupMenuFont() override;
 
+    /** Vintage: tasti in rilievo, con una spia che si accende quando sono attivi. */
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour& backgroundColour,
                                bool isMouseOverButton, bool isButtonDown) override;
+    void drawButtonText (juce::Graphics&, juce::TextButton&, bool isMouseOverButton, bool isButtonDown) override;
     void drawComboBox (juce::Graphics&, int width, int height, bool isButtonDown,
                        int buttonX, int buttonY, int buttonW, int buttonH, juce::ComboBox&) override;
     void positionComboBoxText (juce::ComboBox&, juce::Label&) override;

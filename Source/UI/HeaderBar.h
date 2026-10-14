@@ -84,6 +84,9 @@ public:
 
 private:
     void applyColours();
+    void paintVintage (juce::Graphics& g);
+    /** Primo controllo di ogni gruppo: a sinistra ha il separatore. */
+    std::vector<juce::Component*> separatedControls();
 
     static constexpr int groupGap = 14;   // spazio tra i gruppi di controlli (con il separatore al centro)
 
