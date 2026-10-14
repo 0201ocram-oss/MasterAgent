@@ -99,6 +99,8 @@ private:
     void startTrackAnalysis (const juce::File& file);
     void updateWaveform();
     void updatePlayback();
+    /** Standalone: uscita audio nel tasto play e avviso se il lettore suona ma la scheda audio non è attiva. */
+    void checkAudioOutput();
     ma::MarkerSettings currentMarkerSettings() const;
     /** Nuovo brano nella dashboard: segni ignorati e valori dell'ascolto ripartono da zero. */
     void resetTrackView();
@@ -162,6 +164,10 @@ private:
     std::set<juce::String> ignoredMarkerIds;                  // non salvati: valgono finché il brano resta aperto
     std::array<bool, ma::kNumMarkerTypes> ignoredMarkerTypes {};
     bool playbackHeard = false;                               // il brano aperto è stato ascoltato
+    juce::uint32 lastAudioBlocks = 0;                         // controllo dell'uscita audio (checkAudioOutput)
+    double audioSilentSince = 0.0;
+    bool audioWarningShown = false;
+    juce::String shownOutputDevice { "-" };
 
     ma::ui::DashboardData data;
     ma::TargetProfile referenceProfile;

@@ -146,7 +146,7 @@ void BatchAnalysisJob::start (const juce::Array<juce::File>& newFiles, const juc
     currentIndex.store (0);
     progress.store (0.0f);
     state.store (State::running);
-    startThread (juce::Thread::Priority::background);
+    startThread (juce::Thread::Priority::low);
 }
 
 void BatchAnalysisJob::cancel()
@@ -240,7 +240,7 @@ void ReferenceTrack::load (const juce::File& newFile, double hostSampleRate)
 
     progress.store (0.0f);
     state.store (State::loading);
-    startThread (juce::Thread::Priority::background);
+    startThread (juce::Thread::Priority::low);
 }
 
 void ReferenceTrack::clear()
@@ -307,37 +307,137 @@ void ReferenceTrack::setHostSampleRate (double newRate)
             std::lock_guard<std::mutex> lock (dataMutex);
             resampleOnly = true;
         }
-        startThread (juce::Thread::Priority::background);
+        startThread (juce::Thread::Priority::low);
     }
 }
 
-juce::AudioBuffer<float> ReferenceTrack::makePlaybackBuffer (const juce::AudioBuffer<float>& source, double sourceRate, double hostRate)
+namespace
 {
-    juce::AudioBuffer<float> resampled;
-    const double ratio = sourceRate / hostRate;
-
-    if (std::abs (ratio - 1.0) < 1e-9)
+    /** Funzione di Bessel modificata di ordine zero (finestra di Kaiser). */
+    double besselI0 (double x)
     {
-        resampled.makeCopyOf (source);
-    }
-    else
-    {
-        const int outSamples = (int) std::floor (source.getNumSamples() / ratio);
-        resampled.setSize (2, outSamples);
-        for (int ch = 0; ch < 2; ++ch)
+        double sum = 1.0, term = 1.0;
+        for (int k = 1; k < 64; ++k)
         {
-            juce::WindowedSincInterpolator interpolator;
-            interpolator.process (ratio, source.getReadPointer (std::min (ch, source.getNumChannels() - 1)),
-                                  resampled.getWritePointer (ch), outSamples);
+            const double half = x / (2.0 * k);
+            term *= half * half;
+            sum += term;
+            if (term < 1.0e-14 * sum)
+                break;
         }
+        return sum;
+    }
+}
+
+juce::AudioBuffer<float> resampleForPlayback (const juce::AudioBuffer<float>& source, double sourceRate, double targetRate,
+                                              const std::function<bool()>& shouldExit,
+                                              const std::function<void (float)>& progress)
+{
+    const int inLength = source.getNumSamples();
+    const int inChannels = source.getNumChannels();
+    juce::AudioBuffer<float> out (2, 0);
+    if (inLength == 0 || inChannels == 0 || sourceRate <= 0.0 || targetRate <= 0.0)
+        return out;
+
+    if (std::abs (sourceRate - targetRate) < 1.0e-6)
+    {
+        out.setSize (2, inLength);
+        for (int ch = 0; ch < 2; ++ch)
+            out.copyFrom (ch, 0, source, std::min (ch, inChannels - 1), 0, inLength);
+        return out;
     }
 
-    if (resampled.getNumChannels() == 1)
+    // Filtro: piatto fino a 20 kHz (o 0.45 della frequenza più bassa), attenuato da dove immagini e aliasing
+    // cadrebbero sotto i 20 kHz, taglio a metà della frequenza più bassa. 44.1 -> 48 kHz: 62 coefficienti.
+    constexpr double attenuationDb = 90.0;
+    const double lower = std::min (sourceRate, targetRate);
+    const double pass = std::min (20000.0, 0.45 * lower);
+    const double transition = (lower - 2.0 * pass) / sourceRate;    // in cicli per campione d'ingresso
+    const double cutoff = 0.5 * lower / sourceRate;
+    const double beta = 0.1102 * (attenuationDb - 8.7);
+    const int half = std::clamp ((int) std::ceil ((attenuationDb - 8.0) / (2.285 * juce::MathConstants<double>::twoPi * transition) / 2.0), 8, 512);
+    const int taps = 2 * half;
+
+    // nucleo per phases + 1 posizioni tra due campioni d'ingresso, interpolate linearmente; guadagno 1 in continua
+    constexpr int phases = 256;
+    std::vector<float> table ((size_t) (phases + 1) * (size_t) taps);
+    const double windowNorm = besselI0 (beta);
+    for (int p = 0; p <= phases; ++p)
     {
-        resampled.setSize (2, resampled.getNumSamples(), true);
-        resampled.copyFrom (1, 0, resampled, 0, 0, resampled.getNumSamples());
+        float* row = table.data() + (size_t) p * (size_t) taps;
+        double sum = 0.0;
+        for (int j = 0; j < taps; ++j)
+        {
+            const double t = (double) (j - half + 1) - (double) p / phases;   // distanza dal punto d'uscita, in campioni
+            const double x = juce::MathConstants<double>::pi * 2.0 * cutoff * t;
+            const double sinc = std::abs (x) < 1.0e-12 ? 1.0 : std::sin (x) / x;
+            const double r = t / half;
+            const double window = std::abs (r) >= 1.0 ? 0.0 : besselI0 (beta * std::sqrt (1.0 - r * r)) / windowNorm;
+            const double h = sinc * window;
+            row[j] = (float) h;
+            sum += h;
+        }
+        for (int j = 0; j < taps; ++j)
+            row[j] = (float) (row[j] / sum);
     }
-    return resampled;
+
+    const double step = sourceRate / targetRate;
+    const int outLength = (int) std::floor (inLength / step);
+    out.setSize (2, outLength);
+    const float* inL = source.getReadPointer (0);
+    const float* inR = source.getReadPointer (std::min (1, inChannels - 1));
+    float* outL = out.getWritePointer (0);
+    float* outR = out.getWritePointer (1);
+    std::vector<float> coefficients ((size_t) taps);
+
+    for (int n = 0; n < outLength; ++n)
+    {
+        if ((n & 0x7fff) == 0)
+        {
+            if (shouldExit && shouldExit())
+                return juce::AudioBuffer<float> (2, 0);
+            if (progress)
+                progress ((float) n / (float) outLength);
+        }
+
+        const double position = n * step;
+        const int base = (int) position;
+        const double scaled = (position - base) * phases;
+        const int p = std::min (phases - 1, (int) scaled);
+        const float a = (float) (scaled - p);
+        const float* c0 = table.data() + (size_t) p * (size_t) taps;
+        const float* c1 = c0 + taps;
+        for (int j = 0; j < taps; ++j)
+            coefficients[(size_t) j] = c0[j] + a * (c1[j] - c0[j]);
+
+        const int first = base - half + 1;
+        float sumL = 0.0f, sumR = 0.0f;
+        if (first >= 0 && first + taps <= inLength)
+        {
+            const float* xl = inL + first;
+            const float* xr = inR + first;
+            for (int j = 0; j < taps; ++j)
+            {
+                sumL += coefficients[(size_t) j] * xl[j];
+                sumR += coefficients[(size_t) j] * xr[j];
+            }
+        }
+        else
+        {
+            // inizio e fine del brano: fuori dal file c'è silenzio
+            for (int j = std::max (0, -first); j < std::min (taps, inLength - first); ++j)
+            {
+                sumL += coefficients[(size_t) j] * inL[first + j];
+                sumR += coefficients[(size_t) j] * inR[first + j];
+            }
+        }
+        outL[n] = sumL;
+        outR[n] = sumR;
+    }
+
+    if (progress)
+        progress (1.0f);
+    return out;
 }
 
 double ReferenceTrack::findLoudestStart (const AnalysisSnapshot& s)
@@ -405,7 +505,9 @@ void ReferenceTrack::run()
             std::lock_guard<std::mutex> lock (dataMutex);
             hostRate = pendingHostRate;
         }
-        auto resampled = makePlaybackBuffer (audio, fileRate, hostRate);
+        // buffer d'ascolto: dal 90 al 99% dell'avanzamento (con un nuovo sample rate il reference resta pronto)
+        auto resampled = resampleForPlayback (audio, fileRate, hostRate, [this] { return threadShouldExit(); },
+                                              [this, onlyResample] (float p) { if (! onlyResample) progress.store (0.9f + 0.09f * p); });
         if (threadShouldExit())
             return;
 

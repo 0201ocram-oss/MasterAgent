@@ -62,6 +62,9 @@ public:
     void resetAnalysis() noexcept { liveAnalysis.requestReset(); }
 
     // impostazioni (thread GUI, lette anche dall'audio thread)
+    /** Blocchi audio elaborati: se il lettore suona ma il numero non cresce, la scheda audio non è attiva. */
+    std::atomic<juce::uint32> audioBlocks { 0 };
+
     std::atomic<bool> listenReference { false };
     std::atomic<float> referenceGain { 1.0f };
     std::atomic<bool> autoResetOnPlay { true };

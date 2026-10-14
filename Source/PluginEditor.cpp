@@ -1,5 +1,8 @@
 #include "PluginEditor.h"
 #include "Common/Text.h"
+
+#include <juce_audio_utils/juce_audio_utils.h>
+#include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>   // scheda audio dell'app standalone
 #include "Compare/ReportExporter.h"
 
 using namespace ma;
@@ -793,6 +796,7 @@ void MasterAgentEditor::timerCallback()
         data.masterFileName = processor.getMasterFile().getFileName();
         updateWaveform();
         updatePlayback();
+        checkAudioOutput();
     }
     else
     {
@@ -971,6 +975,48 @@ void MasterAgentEditor::updateWaveform()
 
     const auto& player = processor.getPlayer();
     waveformPanel.setPlayback (player.getPosition(), player.isPlaying());
+}
+
+void MasterAgentEditor::checkAudioOutput()
+{
+    // uscita audio dell'app, nel suggerimento del tasto play
+    auto* holder = juce::StandalonePluginHolder::getInstance();
+    auto* device = holder != nullptr ? holder->deviceManager.getCurrentAudioDevice() : nullptr;
+    const auto description = device != nullptr ? device->getName() + " · "_u + juce::String (device->getCurrentSampleRate() / 1000.0, 1) + " kHz"
+                                               : juce::String();
+    if (description != shownOutputDevice)
+    {
+        shownOutputDevice = description;
+        waveformPanel.setOutputDevice (description);
+    }
+
+    // play premuto ma la scheda audio non chiede audio (scollegata, occupata, nessuna uscita scelta): lo si dice
+    auto& player = processor.getPlayer();
+    const auto blocks = processor.audioBlocks.load();
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    if (! player.isPlaying() || blocks != lastAudioBlocks)
+    {
+        lastAudioBlocks = blocks;
+        audioSilentSince = now;
+        audioWarningShown = audioWarningShown && ! player.isPlaying();
+        return;
+    }
+    if (audioWarningShown || now - audioSilentSince < 1500.0)
+        return;
+
+    audioWarningShown = true;
+    player.pause();
+    const auto message = device == nullptr
+        ? "Nessuna scheda audio attiva: scegli l'uscita nelle impostazioni audio."_t
+        : "La scheda audio %1 non sta suonando: forse è scollegata o usata in modo esclusivo da un altro programma. "
+          "Scegli un'altra uscita nelle impostazioni audio."_t.replace ("%1", device->getName());
+    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon, "Nessun audio in uscita"_t, message,
+                                        "Impostazioni audio..."_t, "Chiudi"_t, nullptr,
+                                        juce::ModalCallbackFunction::create ([] (int result)
+                                        {
+                                            if (auto* h = juce::StandalonePluginHolder::getInstance(); h != nullptr && result == 1)
+                                                h->showAudioSettingsDialog();
+                                        }));
 }
 
 void MasterAgentEditor::updatePlayback()

@@ -225,3 +225,81 @@ TEST_CASE ("Reference: salto di posizione e inizio del ritornello", "[reference]
     reference.clear();
     file.deleteFile();
 }
+
+TEST_CASE ("Reference a 44.1 kHz con la scheda audio a 48 kHz: arriva a pronto in pochi secondi", "[reference]")
+{
+    // un brano da CD (44.1 kHz) con l'uscita a 48 kHz: dopo l'analisi il buffer d'ascolto va ricampionato
+    const double fileRate = 44100.0, hostRate = 48000.0, seconds = 240.0;
+    juce::AudioBuffer<float> audio (2, (int) (seconds * fileRate));
+    juce::Random random (5);
+    for (int ch = 0; ch < 2; ++ch)
+        for (int i = 0; i < audio.getNumSamples(); ++i)
+            audio.setSample (ch, i, 0.2f * (random.nextFloat() * 2.0f - 1.0f));
+    const auto file = writeWav (audio, fileRate);
+
+    ma::ReferenceTrack reference;
+    const auto start = juce::Time::getMillisecondCounterHiRes();
+    reference.load (file, hostRate);
+    float progressWhenSlow = -1.0f;   // prima della correzione restava al 90% per minuti (ricampionamento lentissimo)
+    for (int i = 0; i < 3000 && reference.getState() == ma::ReferenceTrack::State::loading; ++i)
+        juce::Thread::sleep (20);
+    const double elapsed = (juce::Time::getMillisecondCounterHiRes() - start) / 1000.0;
+    if (reference.getState() == ma::ReferenceTrack::State::loading)
+        progressWhenSlow = reference.getProgress();
+    INFO ("secondi: " << elapsed << ", avanzamento se ancora in corso: " << progressWhenSlow);
+    CHECK (reference.getState() == ma::ReferenceTrack::State::ready);
+    CHECK (elapsed < 20.0);
+
+    reference.clear();
+    file.deleteFile();
+}
+
+TEST_CASE ("Ricampionamento per l'ascolto: fedele fino a 20 kHz, senza aliasing udibile", "[reference]")
+{
+    const auto sine = [] (double frequency, double rate, double seconds)
+    {
+        juce::AudioBuffer<float> b (1, (int) (seconds * rate));
+        for (int i = 0; i < b.getNumSamples(); ++i)
+            b.setSample (0, i, (float) (0.5 * std::sin (juce::MathConstants<double>::twoPi * frequency * i / rate)));
+        return b;
+    };
+
+    // scarto massimo dalla sinusoide ideale alla nuova frequenza, lontano dai bordi, in dB rispetto all'ampiezza
+    const auto errorDb = [] (const juce::AudioBuffer<float>& out, double frequency, double rate)
+    {
+        double worst = 0.0;
+        for (int i = (int) (0.1 * rate); i < out.getNumSamples() - (int) (0.1 * rate); ++i)
+        {
+            const double ideal = 0.5 * std::sin (juce::MathConstants<double>::twoPi * frequency * i / rate);
+            worst = std::max (worst, std::abs (out.getSample (0, i) - ideal));
+            worst = std::max (worst, std::abs (out.getSample (1, i) - ideal));   // mono duplicato
+        }
+        return juce::Decibels::gainToDecibels (worst / 0.5, -200.0);
+    };
+
+    for (const double frequency : { 100.0, 1000.0, 10000.0, 18000.0 })
+    {
+        INFO ("44.1 -> 48 kHz, " << frequency << " Hz");
+        const auto out = ma::resampleForPlayback (sine (frequency, 44100.0, 1.0), 44100.0, 48000.0);
+        REQUIRE (out.getNumChannels() == 2);
+        CHECK (out.getNumSamples() == 48000);
+        CHECK (errorDb (out, frequency, 48000.0) < -60.0);
+    }
+    for (const double frequency : { 1000.0, 15000.0 })
+    {
+        INFO ("96 -> 48 kHz, " << frequency << " Hz");
+        CHECK (errorDb (ma::resampleForPlayback (sine (frequency, 96000.0, 1.0), 96000.0, 48000.0), frequency, 48000.0) < -60.0);
+    }
+
+    // 96 -> 48 kHz: un tono a 30 kHz ricadrebbe a 18 kHz; il filtro lo toglie
+    const auto alias = ma::resampleForPlayback (sine (30000.0, 96000.0, 1.0), 96000.0, 48000.0);
+    float peak = 0.0f;
+    for (int i = 4800; i < alias.getNumSamples() - 4800; ++i)
+        peak = std::max (peak, std::abs (alias.getSample (0, i)));
+    CHECK (juce::Decibels::gainToDecibels (peak / 0.5f) < -80.0f);
+
+    // stessa frequenza: copia esatta; interruzione: buffer vuoto
+    const auto same = ma::resampleForPlayback (sine (440.0, 48000.0, 0.5), 48000.0, 48000.0);
+    CHECK (same.getNumSamples() == 24000);
+    CHECK (ma::resampleForPlayback (sine (440.0, 44100.0, 2.0), 44100.0, 48000.0, [] { return true; }).getNumSamples() == 0);
+}

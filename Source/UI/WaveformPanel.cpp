@@ -158,6 +158,12 @@ void WaveformPanel::setStatus (const juce::String& text, float progress)
     repaint();
 }
 
+void WaveformPanel::setOutputDevice (const juce::String& description)
+{
+    playButton->setTooltip ("Ascolta / pausa (barra spaziatrice)"_t + "\n" + "Uscita audio: "_t
+                            + (description.isNotEmpty() ? description : "nessuna scheda audio attiva"_t));
+}
+
 void WaveformPanel::setPlayback (double positionSeconds, bool isPlaying)
 {
     playButton->setPlaying (isPlaying);

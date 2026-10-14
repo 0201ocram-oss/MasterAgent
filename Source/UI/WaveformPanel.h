@@ -25,6 +25,8 @@ public:
     /** Testo al posto della forma d'onda (analisi in corso, errore); progress < 0 = senza barra. */
     void setStatus (const juce::String& text, float progress);
     void setPlayback (double positionSeconds, bool isPlaying);
+    /** Uscita audio dell'app ("Altoparlanti (Realtek) · 48 kHz"), mostrata nel suggerimento del tasto play. */
+    void setOutputDevice (const juce::String& description);
 
     std::function<void (double seconds)> onSeek;
     std::function<void()> onPlayPause;

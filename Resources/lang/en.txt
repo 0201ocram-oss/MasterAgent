@@ -353,3 +353,11 @@ countries: gb us
 "Come il reference" = "Like the reference"
 "Nessuno (solo specifiche)" = "None (specs only)"
 "Target in due parti. Genere: come deve suonare il master (curva tonale, stereo, LRA), da un genere, da un brano di riferimento o da un tuo profilo. Consegna: dove andrà (loudness, true peak e dinamica): master forte per CD e club, una piattaforma streaming, broadcast o podcast." = "Target in two parts. Genre: how the master should sound (tonal curve, stereo, LRA), from a genre, a reference track or one of your profiles. Delivery: where it is going (loudness, true peak and dynamics): loud master for CD and club, a streaming platform, broadcast or podcast."
+
+// --- lettore: uscita audio dell'app ---
+"Uscita audio: " = "Audio output: "
+"nessuna scheda audio attiva" = "no active audio device"
+"Nessun audio in uscita" = "No audio output"
+"Impostazioni audio..." = "Audio settings..."
+"Nessuna scheda audio attiva: scegli l'uscita nelle impostazioni audio." = "No active audio device: choose the output in the audio settings."
+"La scheda audio %1 non sta suonando: forse è scollegata o usata in modo esclusivo da un altro programma. Scegli un'altra uscita nelle impostazioni audio." = "The audio device %1 is not playing: it may be disconnected or used exclusively by another program. Choose another output in the audio settings."

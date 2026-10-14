@@ -5,6 +5,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <atomic>
+#include <functional>
 #include <mutex>
 
 namespace ma
@@ -77,6 +78,16 @@ private:
 };
 
 /**
+    Ricampiona per l'ascolto (A/B con il reference): sinc a fasi multiple con finestra di Kaiser, piatto fino a
+    20 kHz, con immagini e aliasing sotto -90 dB (e comunque sopra i 20 kHz). Coefficienti precalcolati: 4 minuti
+    di brano in pochi secondi. Restituisce sempre 2 canali (un mono viene duplicato); shouldExit interrompe
+    (buffer vuoto), progress riceve l'avanzamento 0..1.
+*/
+juce::AudioBuffer<float> resampleForPlayback (const juce::AudioBuffer<float>& source, double sourceRate, double targetRate,
+                                              const std::function<bool()>& shouldExit = {},
+                                              const std::function<void (float)>& progress = {});
+
+/**
     Brano di riferimento: caricamento e analisi in background, più un buffer ricampionato
     alla frequenza dell'host per l'ascolto A/B con livello allineato.
     In memoria resta solo il buffer di ascolto: se cambia il sample rate dell'host il file si rilegge
@@ -122,7 +133,6 @@ public:
 
 private:
     void run() override;
-    static juce::AudioBuffer<float> makePlaybackBuffer (const juce::AudioBuffer<float>& source, double sourceRate, double hostRate);
 
     std::atomic<State> state { State::empty };
     std::atomic<float> progress { 0.0f };

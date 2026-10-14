@@ -80,6 +80,7 @@ void MasterAgentProcessor::releaseResources()
 void MasterAgentProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
+    audioBlocks.fetch_add (1, std::memory_order_relaxed);
 
     // standalone: l'uscita è il lettore, oppure il reference durante l'ascolto A/B
     if (standalone)
@@ -632,7 +633,9 @@ void MasterAgentProcessor::getStateInformation (juce::MemoryBlock& destData)
         }
         state.appendChild (list, nullptr);
     }
-    state.setProperty ("referencePath", reference.getFile().getFullPathName(), nullptr);
+    // l'app standalone riparte pulita (senza reference); nella DAW il reference fa parte del progetto
+    if (! standalone)
+        state.setProperty ("referencePath", reference.getFile().getFullPathName(), nullptr);
     state.setProperty ("autoReset", autoResetOnPlay.load(), nullptr);
     state.setProperty ("onlyWhilePlaying", analyseOnlyWhilePlaying.load(), nullptr);
     state.setProperty ("liveMode", liveMode.load(), nullptr);
@@ -655,10 +658,13 @@ void MasterAgentProcessor::setStateInformation (const void* data, int sizeInByte
         return;
 
     // progetti salvati prima della scelta genere × consegna: un solo "target" da convertire
-    if (state.hasProperty ("genre"))
-        setTargetSelection ({ state.getProperty ("genre").toString(), state.getProperty ("delivery", ma::targetIds::defaultDelivery).toString() });
-    else
-        setTargetSelection (ma::migrateTargetId (profiles, state.getProperty ("target", ma::targetIds::defaultDelivery).toString()));
+    auto target = state.hasProperty ("genre")
+                      ? ma::TargetSelection { state.getProperty ("genre").toString(), state.getProperty ("delivery", ma::targetIds::defaultDelivery).toString() }
+                      : ma::migrateTargetId (profiles, state.getProperty ("target", ma::targetIds::defaultDelivery).toString());
+    // l'app standalone parte senza reference: un genere "reference" lascerebbe la dashboard senza confronto
+    if (standalone && target.genre == ma::targetIds::reference)
+        target.genre = ma::targetIds::defaultGenre;
+    setTargetSelection (target);
     {
         auto ignored = juce::StringArray::fromLines (state.getProperty ("ignoredFindings", {}).toString());
         ignored.removeEmptyStrings();
@@ -697,8 +703,9 @@ void MasterAgentProcessor::setStateInformation (const void* data, int sizeInByte
         ++versionsRevision;
     }
 
+    // stati dell'app salvati prima di questa versione hanno ancora il percorso: nello standalone si ignora
     const juce::File refFile (state.getProperty ("referencePath", {}).toString());
-    if (refFile.existsAsFile() && refFile != reference.getFile())
+    if (! standalone && refFile.existsAsFile() && refFile != reference.getFile())
         loadReference (refFile);
 }
 
